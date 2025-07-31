@@ -32,7 +32,8 @@ class Backend(Construct):
                                             'bash', '-c',
                                             'pip install uv && uv export --frozen --no-dev --no-editable -o requirements.txt && pip install -r requirements.txt -t /asset-output && cp -r app/* /asset-output/'
                                         ],
-                                        user='root'
+                                        user='root',
+                                        platform='linux/amd64',
                                     )
                                 ),
                                 layers=[

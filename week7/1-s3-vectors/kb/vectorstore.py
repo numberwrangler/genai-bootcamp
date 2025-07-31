@@ -29,7 +29,8 @@ class S3VectorStore(Construct):
                         'bash', '-c',
                         'pip install uv && uv export --frozen --no-dev --no-editable -o requirements.txt && pip install -r requirements.txt -t /asset-output && cp -r *py /asset-output/'
                     ],
-                    user='root'
+                    user='root',
+                    platform='linux/amd64',
                 )
             ),
             timeout=cdk.Duration.minutes(1),
