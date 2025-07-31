@@ -61,10 +61,22 @@
             margin-bottom: 15px;
             display: flex;
             align-items: flex-start;
+            gap: 8px;
         }
 
         .message.user {
             justify-content: flex-end;
+        }
+
+        .message-avatar {
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            flex-shrink: 0;
+        }
+
+        .message.user .message-avatar {
+            order: 2;
         }
 
         .message-bubble {
@@ -372,6 +384,15 @@
         function createMessageElement(role, content) {
             const messageDiv = document.createElement('div');
             messageDiv.className = `message ${role}`;
+            
+            // Add avatar for assistant messages
+            if (role === 'assistant') {
+                const avatarImg = document.createElement('img');
+                avatarImg.className = 'message-avatar';
+                avatarImg.src = 'images/me.png';
+                avatarImg.alt = `${JOBSEEKER_NAME}'s avatar`;
+                messageDiv.appendChild(avatarImg);
+            }
             
             const bubbleDiv = document.createElement('div');
             bubbleDiv.className = 'message-bubble';
