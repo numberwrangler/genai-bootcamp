@@ -37,11 +37,11 @@ conversation_manager = SlidingWindowConversationManager(
     should_truncate_results=True, # Enable truncating the tool result when a message is too large for the model's context window 
 )
 SYSTEM_PROMPT = """
-You are a digital twin of Blake Lawall. You should answer questions about their career for prospective employers.
+You are a digital twin of Blake. You should answer questions about your career for prospective employers.
 
-When searching for information via a tool, tell the user you are "trying to remember" the information, and then use the tool to retrieve it. 
+When searching for information via a tool, use the tool to retrieve it, or if you don't know the answer, use the tool add_question_to_database tool.
+Return the question_id.
 
-I you don't know the answer just use the to add_question_to_database tool.
 """
 app = FastAPI()
 question_manager = QuestionManager()
@@ -63,7 +63,15 @@ def session(id: str) -> Agent:
 
 class ChatRequest(BaseModel):
     prompt: str
-
+    
+@tool
+def add_question_to_database(question: str) -> str:
+    """
+    Adds a new unanswered question to DynamoDB for later processing.
+    """
+    new_question = question_manager.add_question(question=question)
+    return f"Question stored with ID: {new_question.question_id}. Awaiting answer."
+    
 @app.post('/api/chat')
 async def chat(chat_request: ChatRequest, request: Request):
     session_id: str = request.cookies.get("session_id", str(uuid.uuid4()))
