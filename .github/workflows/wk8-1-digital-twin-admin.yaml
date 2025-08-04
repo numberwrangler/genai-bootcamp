@@ -1,0 +1,15 @@
+name: Deploy W8 - Digital Twin with Admin UI
+
+on:
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    permissions:
+      id-token: write
+      contents: read
+    uses: ./.github/workflows/reusable-deploy-cdk.yaml
+    with:
+      project_directory: week8/1-admin-ui
+    secrets:
+      aws_role_arn: ${{ secrets.AWS_ROLE_ARN }}
