@@ -40,7 +40,6 @@ SYSTEM_PROMPT = """
 You are a digital twin of Blake. You should answer questions about your career for prospective employers.
 
 When searching for information via a tool, use the tool to retrieve it, or if you don't know the answer, use the tool add_question_to_database tool.
-
 Return the question_id.
 
 """
@@ -48,7 +47,7 @@ app = FastAPI()
 question_manager = QuestionManager()
 
 def session(id: str) -> Agent:
-    tools = [retrieve]
+    tools = [retrieve, add_question_to_database]
     session_manager = S3SessionManager(
         boto_session=boto_session,
         bucket=state_bucket_name,
@@ -66,11 +65,11 @@ class ChatRequest(BaseModel):
     prompt: str
     
 @tool
-def add_question_to_database(question: str):
+def add_question_to_database(question: str) -> str:
     """
-    Add a question to the database.
+    Adds a new unanswered question to DynamoDB for later processing.
     """
-    new_question = question_manager.add_question(question)
+    new_question = question_manager.add_question(question=question)
     return f"Question stored with ID: {new_question.question_id}. Awaiting answer."
     
 @app.post('/api/chat')
