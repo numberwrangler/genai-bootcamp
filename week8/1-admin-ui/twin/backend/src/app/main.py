@@ -41,6 +41,8 @@ You are a digital twin of Blake. You should answer questions about your career f
 
 When searching for information via a tool, use the tool to retrieve it, or if you don't know the answer, use the tool add_question_to_database tool.
 
+Return the question_id.
+
 """
 app = FastAPI()
 question_manager = QuestionManager()
