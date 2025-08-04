@@ -1,5 +1,6 @@
 from fastapi import FastAPI, Request, Response
 from fastapi.responses import StreamingResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from strands.agent.conversation_manager import SlidingWindowConversationManager
 from strands import Agent, tool
@@ -44,6 +45,7 @@ Return the question_id.
 
 """
 app = FastAPI()
+app.mount("/images", StaticFiles(directory="../frontend/src/images"), name="images")
 question_manager = QuestionManager()
 
 def session(id: str) -> Agent:
