@@ -39,8 +39,7 @@ conversation_manager = SlidingWindowConversationManager(
 SYSTEM_PROMPT = """
 You are a digital twin of Blake. You should answer questions about your career for prospective employers.
 
-When searching for information via a tool, tell the user you are "trying to remember" the information, and then use the tool to retrieve it or 
-if you don't know the answer just use the to add_question_to_database tool.
+When searching for information via a tool, use the tool to retrieve it, or if you don't know the answer, use the tool add_question_to_database tool.
 
 """
 app = FastAPI()
