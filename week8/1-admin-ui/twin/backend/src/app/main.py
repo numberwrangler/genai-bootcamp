@@ -45,7 +45,7 @@ Return the question_id.
 
 """
 app = FastAPI()
-app.mount("/images", StaticFiles(directory="../frontend/src/images"), name="images")
+app.mount("/images", StaticFiles(directory="../../frontend/src/images"), name="images")
 question_manager = QuestionManager()
 
 def session(id: str) -> Agent:
