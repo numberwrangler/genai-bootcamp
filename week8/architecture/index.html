@@ -1,0 +1,372 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AWS Architecture Diagram - Interactive</title>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@10.6.1/dist/mermaid.min.js"></script>
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <style>
+        body {
+            margin: 0;
+            padding: 20px;
+            font-family: Arial, sans-serif;
+            background-color: #f5f5f5;
+        }
+        
+        .header {
+            text-align: center;
+            margin-bottom: 20px;
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        
+        .diagram-container {
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            overflow: hidden;
+            position: relative;
+            height: 80vh;
+            cursor: grab;
+        }
+        
+        .diagram-container:active {
+            cursor: grabbing;
+        }
+        
+        .controls {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            z-index: 1000;
+            display: flex;
+            gap: 5px;
+        }
+        
+        .control-btn {
+            background: #007bff;
+            color: white;
+            border: none;
+            padding: 8px 12px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+        }
+        
+        .control-btn:hover {
+            background: #0056b3;
+        }
+        
+        .zoom-info {
+            position: absolute;
+            bottom: 10px;
+            left: 10px;
+            background: rgba(0,0,0,0.7);
+            color: white;
+            padding: 5px 10px;
+            border-radius: 4px;
+            font-size: 12px;
+            z-index: 1000;
+        }
+        
+        #diagram {
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+        }
+        
+        .mermaid-container {
+            transform-origin: 0 0;
+            transition: transform 0.1s ease-out;
+        }
+        
+        .instructions {
+            background: #e3f2fd;
+            padding: 15px;
+            margin-bottom: 20px;
+            border-radius: 8px;
+            border-left: 4px solid #2196f3;
+        }
+        
+        .instructions h3 {
+            margin-top: 0;
+            color: #1976d2;
+        }
+        
+        .instructions ul {
+            margin-bottom: 0;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>AWS Serverless Chat Architecture</h1>
+        <p>Interactive diagram showing the complete flow from user queries to admin management</p>
+    </div>
+    
+    <div class="instructions">
+        <h3>How to Navigate:</h3>
+        <ul>
+            <li><strong>Pan:</strong> Click and drag to move around the diagram</li>
+            <li><strong>Zoom:</strong> Use mouse wheel or the +/- buttons</li>
+            <li><strong>Reset:</strong> Click the "Reset View" button to return to original position</li>
+            <li><strong>Fit:</strong> Click "Fit to Screen" to auto-scale the diagram</li>
+        </ul>
+    </div>
+    
+    <div class="diagram-container" id="diagramContainer">
+        <div class="controls">
+            <button class="control-btn" onclick="zoomIn()">+</button>
+            <button class="control-btn" onclick="zoomOut()">-</button>
+            <button class="control-btn" onclick="resetView()">Reset View</button>
+            <button class="control-btn" onclick="fitToScreen()">Fit to Screen</button>
+        </div>
+        <div class="zoom-info" id="zoomInfo">Zoom: 100%</div>
+        <div id="diagram"></div>
+    </div>
+
+    <script>
+        // Initialize Mermaid
+        mermaid.initialize({ 
+            startOnLoad: false,
+            theme: 'default',
+            flowchart: {
+                useMaxWidth: false,
+                htmlLabels: true
+            }
+        });
+
+        // Mermaid diagram definition
+        const diagramDefinition = `
+graph TB
+    %% Users and Browsers
+    User[👤 General User<br/>Web Browser]
+    Admin[👨‍💼 Admin User<br/>Web Browser]
+    
+    %% CloudFront
+    CF[☁️ CloudFront Distribution]
+    
+    %% Authentication
+    Cognito[🔐 Amazon Cognito<br/>Authentication]
+    
+    %% Lambda Functions
+    ChatLambda[⚡ Chat Lambda Function]
+    AdminLambda[⚡ Admin Lambda Function]
+    
+    %% DynamoDB
+    DDB[🗄️ DynamoDB<br/>Unanswered Questions]
+    
+    %% SNS
+    SNS[📢 Amazon SNS Topic<br/>Admin Notifications]
+    
+    %% Bedrock Services
+    BedrockClaude[🤖 Amazon Bedrock<br/>Claude 4 Sonnet]
+    BedrockTitan[🔗 Amazon Bedrock<br/>Titan Embeddings]
+    KB[📚 Bedrock Knowledge Base]
+    
+    %% S3 Buckets
+    S3Vector[🪣 S3 Vector Bucket<br/>Vector Embeddings]
+    S3Bucket[🪣 S3 Bucket<br/>Q&A Documents]
+    
+    %% User Flow
+    User -->|Chat Requests| CF
+    CF -->|Route to Chat| ChatLambda
+    ChatLambda -->|Generate Response| BedrockClaude
+    BedrockClaude -->|Stream Response| ChatLambda
+    ChatLambda -->|Stream to User| CF
+    CF -->|Response| User
+    
+    %% Knowledge Base Flow
+    BedrockClaude -->|Retrieve Context| KB
+    KB -->|Query Vectors| S3Vector
+    KB -->|Generate Embeddings| BedrockTitan
+    
+    %% Unanswered Questions Flow
+    ChatLambda -->|Store Unanswered| DDB
+    ChatLambda -->|Notify Admin| SNS
+    SNS -->|Notification| Admin
+    
+    %% Admin Flow
+    Admin -->|Login Request| Cognito
+    Cognito -->|Auth Token| Admin
+    Admin -->|Authenticated Requests<br/>with Token| CF
+    CF -->|Route to Admin<br/>with Auth| AdminLambda
+    AdminLambda -->|Retrieve Questions| DDB
+    AdminLambda -->|Store Answers| S3Bucket
+    AdminLambda -->|Trigger Sync| KB
+    
+    %% Knowledge Base Sync Flow
+    KB -->|Retrieve Documents| S3Bucket
+    KB -->|Generate Embeddings| BedrockTitan
+    BedrockTitan -->|Store Vectors| S3Vector
+    
+    %% Styling
+    classDef userClass fill:#e1f5fe,stroke:#01579b,stroke-width:2px
+    classDef awsService fill:#fff3e0,stroke:#e65100,stroke-width:2px
+    classDef lambda fill:#f3e5f5,stroke:#4a148c,stroke-width:2px
+    classDef storage fill:#e8f5e8,stroke:#1b5e20,stroke-width:2px
+    classDef ai fill:#fce4ec,stroke:#880e4f,stroke-width:2px
+    
+    class User,Admin userClass
+    class CF,Cognito,SNS awsService
+    class ChatLambda,AdminLambda lambda
+    class DDB,S3Vector,S3Bucket storage
+    class BedrockClaude,BedrockTitan,KB ai
+        `;
+
+        // Pan and zoom variables
+        let currentScale = 1;
+        let currentX = 0;
+        let currentY = 0;
+        let isDragging = false;
+        let startX, startY;
+        let diagramElement;
+
+        // Render the diagram
+        async function renderDiagram() {
+            const element = document.getElementById('diagram');
+            const { svg } = await mermaid.render('mermaid-diagram', diagramDefinition);
+            element.innerHTML = svg;
+            
+            // Get the SVG element for manipulation
+            diagramElement = element.querySelector('svg');
+            diagramElement.style.transformOrigin = '0 0';
+            
+            // Set up event listeners
+            setupEventListeners();
+            
+            // Initial fit to screen
+            setTimeout(fitToScreen, 100);
+        }
+
+        function setupEventListeners() {
+            const container = document.getElementById('diagramContainer');
+            
+            // Mouse events for panning
+            container.addEventListener('mousedown', startDrag);
+            container.addEventListener('mousemove', drag);
+            container.addEventListener('mouseup', endDrag);
+            container.addEventListener('mouseleave', endDrag);
+            
+            // Wheel event for zooming
+            container.addEventListener('wheel', zoom);
+            
+            // Touch events for mobile
+            container.addEventListener('touchstart', handleTouchStart);
+            container.addEventListener('touchmove', handleTouchMove);
+            container.addEventListener('touchend', endDrag);
+        }
+
+        function startDrag(e) {
+            isDragging = true;
+            startX = e.clientX - currentX;
+            startY = e.clientY - currentY;
+            e.preventDefault();
+        }
+
+        function drag(e) {
+            if (!isDragging) return;
+            
+            currentX = e.clientX - startX;
+            currentY = e.clientY - startY;
+            updateTransform();
+            e.preventDefault();
+        }
+
+        function endDrag() {
+            isDragging = false;
+        }
+
+        function zoom(e) {
+            e.preventDefault();
+            
+            const rect = document.getElementById('diagramContainer').getBoundingClientRect();
+            const mouseX = e.clientX - rect.left;
+            const mouseY = e.clientY - rect.top;
+            
+            const delta = e.deltaY > 0 ? 0.9 : 1.1;
+            const newScale = Math.max(0.1, Math.min(5, currentScale * delta));
+            
+            // Adjust position to zoom towards mouse cursor
+            currentX = mouseX - (mouseX - currentX) * (newScale / currentScale);
+            currentY = mouseY - (mouseY - currentY) * (newScale / currentScale);
+            
+            currentScale = newScale;
+            updateTransform();
+            updateZoomInfo();
+        }
+
+        function handleTouchStart(e) {
+            if (e.touches.length === 1) {
+                const touch = e.touches[0];
+                startDrag({ clientX: touch.clientX, clientY: touch.clientY, preventDefault: () => {} });
+            }
+        }
+
+        function handleTouchMove(e) {
+            if (e.touches.length === 1) {
+                const touch = e.touches[0];
+                drag({ clientX: touch.clientX, clientY: touch.clientY, preventDefault: () => {} });
+            }
+            e.preventDefault();
+        }
+
+        function updateTransform() {
+            if (diagramElement) {
+                diagramElement.style.transform = `translate(${currentX}px, ${currentY}px) scale(${currentScale})`;
+            }
+        }
+
+        function updateZoomInfo() {
+            document.getElementById('zoomInfo').textContent = `Zoom: ${Math.round(currentScale * 100)}%`;
+        }
+
+        function zoomIn() {
+            currentScale = Math.min(5, currentScale * 1.2);
+            updateTransform();
+            updateZoomInfo();
+        }
+
+        function zoomOut() {
+            currentScale = Math.max(0.1, currentScale * 0.8);
+            updateTransform();
+            updateZoomInfo();
+        }
+
+        function resetView() {
+            currentScale = 1;
+            currentX = 0;
+            currentY = 0;
+            updateTransform();
+            updateZoomInfo();
+        }
+
+        function fitToScreen() {
+            if (!diagramElement) return;
+            
+            const container = document.getElementById('diagramContainer');
+            const containerRect = container.getBoundingClientRect();
+            const svgRect = diagramElement.getBoundingClientRect();
+            
+            // Calculate scale to fit
+            const scaleX = (containerRect.width - 40) / svgRect.width;
+            const scaleY = (containerRect.height - 40) / svgRect.height;
+            currentScale = Math.min(scaleX, scaleY, 1);
+            
+            // Center the diagram
+            currentX = (containerRect.width - svgRect.width * currentScale) / 2;
+            currentY = (containerRect.height - svgRect.height * currentScale) / 2;
+            
+            updateTransform();
+            updateZoomInfo();
+        }
+
+        // Initialize the diagram when the page loads
+        window.addEventListener('load', renderDiagram);
+    </script>
+</body>
+</html>

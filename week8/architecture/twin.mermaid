@@ -1,0 +1,74 @@
+graph TB
+    %% Users and Browsers
+    User[👤 General User<br/>Web Browser]
+    Admin[👨‍💼 Admin User<br/>Web Browser]
+    
+    %% CloudFront
+    CF[☁️ CloudFront Distribution]
+    
+    %% Authentication
+    Cognito[🔐 Amazon Cognito<br/>Authentication]
+    
+    %% Lambda Functions
+    ChatLambda[⚡ Chat Lambda Function]
+    AdminLambda[⚡ Admin Lambda Function]
+    
+    %% DynamoDB
+    DDB[🗄️ DynamoDB<br/>Unanswered Questions]
+    
+    %% SNS
+    SNS[📢 Amazon SNS Topic<br/>Admin Notifications]
+    
+    %% Bedrock Services
+    BedrockClaude[🤖 Amazon Bedrock<br/>Claude 4 Sonnet]
+    BedrockTitan[🔗 Amazon Bedrock<br/>Titan Embeddings]
+    KB[📚 Bedrock Knowledge Base]
+    
+    %% S3 Buckets
+    S3Vector[🪣 S3 Vector Bucket<br/>Vector Embeddings]
+    S3Bucket[🪣 S3 Bucket<br/>Q&A Documents]
+    
+    %% User Flow
+    User -->|Chat Requests| CF
+    CF -->|Route to Chat| ChatLambda
+    ChatLambda -->|Generate Response| BedrockClaude
+    BedrockClaude -->|Stream Response| ChatLambda
+    ChatLambda -->|Stream to User| CF
+    CF -->|Response| User
+    
+    %% Knowledge Base Flow
+    BedrockClaude -->|Retrieve Context| KB
+    KB -->|Query Vectors| S3Vector
+    KB -->|Generate Embeddings| BedrockTitan
+    
+    %% Unanswered Questions Flow
+    ChatLambda -->|Store Unanswered| DDB
+    ChatLambda -->|Notify Admin| SNS
+    SNS -->|Notification| Admin
+    
+    %% Admin Flow
+    Admin -->|Login Request| Cognito
+    Cognito -->|Auth Token| Admin
+    Admin -->|Authenticated Requests<br/>with Token| CF
+    CF -->|Route to Admin<br/>with Auth| AdminLambda
+    AdminLambda -->|Retrieve Questions| DDB
+    AdminLambda -->|Store Answers| S3Bucket
+    AdminLambda -->|Trigger Sync| KB
+    
+    %% Knowledge Base Sync Flow
+    KB -->|Retrieve Documents| S3Bucket
+    KB -->|Generate Embeddings| BedrockTitan
+    BedrockTitan -->|Store Vectors| S3Vector
+    
+    %% Styling
+    classDef userClass fill:#e1f5fe,stroke:#01579b,stroke-width:2px
+    classDef awsService fill:#fff3e0,stroke:#e65100,stroke-width:2px
+    classDef lambda fill:#f3e5f5,stroke:#4a148c,stroke-width:2px
+    classDef storage fill:#e8f5e8,stroke:#1b5e20,stroke-width:2px
+    classDef ai fill:#fce4ec,stroke:#880e4f,stroke-width:2px
+    
+    class User,Admin userClass
+    class CF,Cognito,SNS awsService
+    class ChatLambda,AdminLambda lambda
+    class DDB,S3Vector,S3Bucket storage
+    class BedrockClaude,BedrockTitan,KB ai
