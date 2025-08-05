@@ -13,7 +13,6 @@ import os
 import uuid
 import uvicorn
 from questions import Question, QuestionManager
-import time
 
 # Re-use boto session across invocations
 boto_session = boto3.Session()
@@ -43,7 +42,7 @@ You are a digital twin of Blake. You should answer questions about my career for
 
 When searching for information via a tool, use the tool to retrieve it, or if you don't know the answer, use the tool add_question_to_database tool.
 Return the question_id.
-WHen typing the answer out use tool stream.
+WHen typing the answer out use tool type_out_text.
 
 """
 app = FastAPI()
