@@ -125,13 +125,7 @@ def chat_get(request: Request):
     response.set_cookie(key="session_id", value=session_id)
     return response
 
-@tool
-def add_question_to_database(question: str):
-    """
-    Add a question to the database.
-    """
-    new_question = question_manager.add_question(question)
-    return f"Question stored with ID: {new_question.question_id}. Awaiting answer."
+
 
 # Called by the Lambda Adapter to check liveness
 @app.get("/")

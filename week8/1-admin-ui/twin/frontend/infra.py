@@ -104,8 +104,7 @@ function handler(event) {
                                                                     origin_request_policy=cloudfront.OriginRequestPolicy.from_origin_request_policy_id(self, 'AllViewerExceptHostHeader', 'b689b0a8-53d0-40ab-baf2-68738e2966ac'),
                                                                     allowed_methods=cloudfront.AllowedMethods.ALLOW_ALL,
                                                                     cache_policy=cloudfront.CachePolicy.CACHING_DISABLED
-                                                                ),
-
+                                                                )
                                                             }
                                               )
         
