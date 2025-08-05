@@ -40,8 +40,7 @@ conversation_manager = SlidingWindowConversationManager(
 SYSTEM_PROMPT = """
 You are a digital twin of Blake. You should answer questions about my career for prospective employers. Answer as though I am talking. Do not give out any PII information.
 
-When searching for information via a tool, use the tool to retrieve it, or if you don't know the answer, use the tool add_question_to_database tool.
-Return the question_id.
+When searching for information via a tool, use the tool to retrieve it, or if you don't know the answer, use the add_question_to_database tool.
 
 Always provide your responses naturally. The typewriter effect will be handled automatically.
 """
@@ -67,7 +66,8 @@ def type_out_text(answer: str) -> str:
     
     
 def session(id: str) -> Agent:
-    tools = [retrieve, add_question_to_database, type_out_text]
+    # Temporarily disable tools to test basic functionality
+    tools = []  # [retrieve, add_question_to_database, type_out_text]
     logger.info(f"Available tools: {[tool.__name__ if hasattr(tool, '__name__') else str(tool) for tool in tools]}")
     
     session_manager = S3SessionManager(
@@ -135,8 +135,10 @@ async def generate(agent: Agent, session_id: str, prompt: str, request: Request)
             agent.messages = []
         
         full_response = ""
+        event_count = 0
         async for event in agent.stream_async(prompt):
-            logger.info(f"Stream event: {event}")  # Debug logging
+            event_count += 1
+            logger.info(f"Stream event #{event_count}: {event}")  # Debug logging
             
             if "complete" in event:
                 logger.info("Response generation complete")
@@ -152,11 +154,16 @@ async def generate(agent: Agent, session_id: str, prompt: str, request: Request)
                 yield f"data: [Tool result: {tool_result}]\n\n"
             elif "data" in event:
                 full_response += event['data']
-                # Create typewriter effect by yielding one character at a time
-                for char in event['data']:
-                    yield f"data: {char}\n\n"
-                    # Add a small delay for typewriter effect
-                    await asyncio.sleep(0.03)  # 30ms delay between characters
+                logger.info(f"Received data: '{event['data']}'")
+                # Simple streaming without typewriter effect for debugging
+                yield f"data: {event['data']}\n\n"
+            else:
+                logger.warning(f"Unknown event type: {event}")
+        
+        logger.info(f"Total events processed: {event_count}")
+        if event_count == 0:
+            logger.error("No events received from agent.stream_async!")
+            yield f"data: [Error: No response generated]\n\n"
     except Exception as e:
         error_message = json.dumps({"error": str(e)})
         yield f"event: error\ndata: {error_message}\n\n"
@@ -226,6 +233,36 @@ def test_tools(request: Request):
         logger.error(f"Tool test failed: {e}")
         return Response(
             content=json.dumps({"error": f"Tool test failed: {str(e)}"}),
+            media_type="application/json",
+            status_code=500
+        )
+
+@app.get('/api/test-agent')
+def test_agent(request: Request):
+    """Test if the agent can respond without tools"""
+    try:
+        session_id = str(uuid.uuid4())
+        agent = session(session_id)
+        
+        # Test a simple response without tools
+        test_prompt = "Hello, can you introduce yourself?"
+        logger.info(f"Testing agent with prompt: {test_prompt}")
+        
+        # Use a simple call instead of streaming for testing
+        response = agent(test_prompt)
+        logger.info(f"Agent test response: {response}")
+        
+        return Response(
+            content=json.dumps({
+                "message": "Agent test successful",
+                "response": str(response)
+            }),
+            media_type="application/json",
+        )
+    except Exception as e:
+        logger.error(f"Agent test failed: {e}")
+        return Response(
+            content=json.dumps({"error": f"Agent test failed: {str(e)}"}),
             media_type="application/json",
             status_code=500
         )
