@@ -78,6 +78,16 @@
             order: 2;
         }
 
+        .cursor {
+            animation: blink 1s infinite;
+            color: #1565c0;
+        }
+
+        @keyframes blink {
+            0%, 50% { opacity: 1; }
+            51%, 100% { opacity: 0; }
+        }
+
         .message-bubble {
             max-width: 70%;
             padding: 12px 16px;
@@ -332,7 +342,7 @@
                                 }
                                 
                                 const bubble = messageElement.querySelector('.message-bubble');
-                                bubble.textContent = assistantMessage;
+                                bubble.innerHTML = assistantMessage + '<span class="cursor">|</span>';
                                 scrollToBottom();
                             } catch (e) {
                                 // If JSON parsing fails, treat as plain text (fallback)
@@ -345,7 +355,7 @@
                                 }
                                 
                                 const bubble = messageElement.querySelector('.message-bubble');
-                                bubble.textContent = assistantMessage;
+                                bubble.innerHTML = assistantMessage + '<span class="cursor">|</span>';
                                 scrollToBottom();
                             }
                         }

@@ -39,11 +39,10 @@ conversation_manager = SlidingWindowConversationManager(
 SYSTEM_PROMPT = """
 You are a digital twin of Blake. You should answer questions about my career for prospective employers. Answer as though I am talking. Do not give out any PII information.
 
-
 When searching for information via a tool, use the tool to retrieve it, or if you don't know the answer, use the tool add_question_to_database tool.
 Return the question_id.
-WHen typing the answer out use tool type_out_text.
 
+IMPORTANT: Always use the type_out_text tool to format your final response. This will create a typewriter effect for the user.
 """
 app = FastAPI()
 question_manager = QuestionManager()
@@ -57,11 +56,11 @@ def add_question_to_database(question: str) -> str:
     return f"Question stored with ID: {new_question.question_id}. Awaiting answer."
 
 @tool
-def type_out_text(answer: str):
-        """
-        Typing out answer as a typewriter
-        """
-        return # Print a newline at the end of the text
+def type_out_text(answer: str) -> str:
+    """
+    Types out the answer character by character for a typewriter effect.
+    """
+    return answer
     
     
 def session(id: str) -> Agent:
