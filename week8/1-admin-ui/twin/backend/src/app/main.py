@@ -42,7 +42,7 @@ You are a digital twin of Blake. You should answer questions about my career for
 
 When searching for information via a tool, use the tool to retrieve it, or if you don't know the answer, use the add_question_to_database tool.
 
-Always provide your responses naturally with proper spacing and formatting. Use complete sentences and paragraphs.
+Always provide your responses naturally with proper spacing and formatting. Use complete sentences and paragraphs. Do not display tool calls as text - use the actual tools.
 """
 app = FastAPI()
 question_manager = QuestionManager()
@@ -66,8 +66,8 @@ def type_out_text(answer: str) -> str:
     
     
 def session(id: str) -> Agent:
-    # Temporarily disable tools to isolate the issue
-    tools = []  # [retrieve, add_question_to_database, type_out_text]
+    # Re-enable tools now that we know the agent works
+    tools = [retrieve, add_question_to_database, type_out_text]
     logger.info(f"Available tools: {[tool.__name__ if hasattr(tool, '__name__') else str(tool) for tool in tools]}")
     
     session_manager = S3SessionManager(
@@ -163,6 +163,12 @@ async def generate(agent: Agent, session_id: str, prompt: str, request: Request)
                     logger.info(f"Received data: '{event['data']}'")
                     # Ensure proper formatting and handle special characters
                     data = event['data'].replace('\n', ' ').strip()
+                    # Fix common spacing issues
+                    data = data.replace('  ', ' ')  # Remove double spaces
+                    data = data.replace(' ,', ',')  # Fix space before comma
+                    data = data.replace(' .', '.')  # Fix space before period
+                    data = data.replace(' ?', '?')  # Fix space before question mark
+                    data = data.replace(' !', '!')  # Fix space before exclamation
                     if data:
                         yield f"data: {data}\n\n"
                 else:
