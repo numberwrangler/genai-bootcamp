@@ -67,17 +67,6 @@
             justify-content: flex-end;
         }
 
-        .message-avatar {
-            width: 32px;
-            height: 32px;
-            border-radius: 50%;
-            flex-shrink: 0;
-        }
-
-        .message.user .message-avatar {
-            order: 2;
-        }
-
         .message-bubble {
             max-width: 70%;
             padding: 12px 16px;
@@ -228,7 +217,7 @@
 
     <script>
         // CONFIGURATION - Edit this name to customize for different jobseekers
-        const JOBSEEKER_NAME = "Blake";
+        const JOBSEEKER_NAME = "No Juan";
         
         // Update page title with jobseeker name
         document.getElementById('chat-title').textContent = `Chat with ${JOBSEEKER_NAME}'s Digital Twin`;
@@ -383,15 +372,6 @@
         function createMessageElement(role, content) {
             const messageDiv = document.createElement('div');
             messageDiv.className = `message ${role}`;
-            
-            // Add avatar for assistant messages
-            if (role === 'assistant') {
-                const avatarImg = document.createElement('img');
-                avatarImg.className = 'message-avatar';
-                avatarImg.src = 'images/me.png';
-                avatarImg.alt = `${JOBSEEKER_NAME}'s avatar`;
-                messageDiv.appendChild(avatarImg);
-            }
             
             const bubbleDiv = document.createElement('div');
             bubbleDiv.className = 'message-bubble';
