@@ -66,8 +66,8 @@ def type_out_text(answer: str) -> str:
     
     
 def session(id: str) -> Agent:
-    # Re-enable tools now that we know the agent works
-    tools = [retrieve, add_question_to_database, type_out_text]
+    # Temporarily disable tools to isolate the issue
+    tools = []  # [retrieve, add_question_to_database, type_out_text]
     logger.info(f"Available tools: {[tool.__name__ if hasattr(tool, '__name__') else str(tool) for tool in tools]}")
     
     session_manager = S3SessionManager(
@@ -136,36 +136,60 @@ async def generate(agent: Agent, session_id: str, prompt: str, request: Request)
         
         full_response = ""
         event_count = 0
-        async for event in agent.stream_async(prompt):
-            event_count += 1
-            logger.info(f"Stream event #{event_count}: {event}")  # Debug logging
-            
-            if "complete" in event:
-                logger.info("Response generation complete")
-            elif "tool_use" in event:
-                # Handle tool calls - show that a tool is being used
-                tool_name = event.get("tool_use", {}).get("name", "unknown tool")
-                logger.info(f"Tool being used: {tool_name}")
-                yield f"data: [Using {tool_name}...]\n\n"
-            elif "tool_result" in event:
-                # Handle tool results - show the result
-                tool_result = event.get("tool_result", {}).get("content", "No result")
-                logger.info(f"Tool result received: {tool_result[:100]}...")
-                yield f"data: [Tool result: {tool_result}]\n\n"
-            elif "data" in event:
-                full_response += event['data']
-                logger.info(f"Received data: '{event['data']}'")
-                # Ensure proper formatting and handle special characters
-                data = event['data'].replace('\n', ' ').strip()
-                if data:
-                    yield f"data: {data}\n\n"
-            else:
-                logger.warning(f"Unknown event type: {event}")
+        timeout_count = 0
+        max_timeout = 30  # 30 seconds timeout
         
-        logger.info(f"Total events processed: {event_count}")
-        if event_count == 0:
-            logger.error("No events received from agent.stream_async!")
-            yield f"data: [Error: No response generated]\n\n"
+        try:
+            async for event in agent.stream_async(prompt):
+                event_count += 1
+                timeout_count = 0  # Reset timeout counter on any event
+                logger.info(f"Stream event #{event_count}: {event}")  # Debug logging
+                
+                if "complete" in event:
+                    logger.info("Response generation complete")
+                    break
+                elif "tool_use" in event:
+                    # Handle tool calls - show that a tool is being used
+                    tool_name = event.get("tool_use", {}).get("name", "unknown tool")
+                    logger.info(f"Tool being used: {tool_name}")
+                    yield f"data: [Using {tool_name}...]\n\n"
+                elif "tool_result" in event:
+                    # Handle tool results - show the result
+                    tool_result = event.get("tool_result", {}).get("content", "No result")
+                    logger.info(f"Tool result received: {tool_result[:100]}...")
+                    yield f"data: [Tool result: {tool_result}]\n\n"
+                elif "data" in event:
+                    full_response += event['data']
+                    logger.info(f"Received data: '{event['data']}'")
+                    # Ensure proper formatting and handle special characters
+                    data = event['data'].replace('\n', ' ').strip()
+                    if data:
+                        yield f"data: {data}\n\n"
+                else:
+                    logger.warning(f"Unknown event type: {event}")
+                
+                # Add timeout protection
+                await asyncio.sleep(0.1)  # Small delay to prevent blocking
+                
+            logger.info(f"Total events processed: {event_count}")
+            if event_count == 0:
+                logger.error("No events received from agent.stream_async!")
+                yield f"data: [Error: No response generated]\n\n"
+                
+        except asyncio.TimeoutError:
+            logger.error("Streaming timeout - agent took too long to respond")
+            yield f"data: [Error: Response timeout]\n\n"
+        except Exception as e:
+            logger.error(f"Streaming error: {e}")
+            # Try fallback to non-streaming approach
+            try:
+                logger.info("Attempting fallback to non-streaming response")
+                response = agent(prompt)
+                logger.info(f"Fallback response: {response}")
+                yield f"data: {str(response)}\n\n"
+            except Exception as fallback_error:
+                logger.error(f"Fallback also failed: {fallback_error}")
+                yield f"data: [Error: {str(e)}]\n\n"
     except Exception as e:
         error_message = json.dumps({"error": str(e)})
         yield f"event: error\ndata: {error_message}\n\n"
