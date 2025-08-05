@@ -42,7 +42,7 @@ You are a digital twin of Blake. You should answer questions about my career for
 
 When searching for information via a tool, use the tool to retrieve it, or if you don't know the answer, use the tool add_question_to_database tool.
 Return the question_id.
-WHen typing the answer out use tool type_set_answer.
+WHen typing the answer out use tool type_set_text.
 
 """
 app = FastAPI()
@@ -57,14 +57,15 @@ def add_question_to_database(question: str) -> str:
     return f"Question stored with ID: {new_question.question_id}. Awaiting answer."
 
 @tool
-def type_set_answer(answer: str) -> str:
-    """
-    Type the answer out as though I am typing in real time.
-    """
+def type_out_text(text, delay=0.05):
+        for char in text:
+            print(char, end='', flush=True)  # Print character without newline, flush buffer
+            time.sleep(delay)
+        print()  # Print a newline at the end of the text
     
     
 def session(id: str) -> Agent:
-    tools = [retrieve, add_question_to_database, type_set_answer]
+    tools = [retrieve, add_question_to_database, type_set_text]
     session_manager = S3SessionManager(
         boto_session=boto_session,
         bucket=state_bucket_name,
