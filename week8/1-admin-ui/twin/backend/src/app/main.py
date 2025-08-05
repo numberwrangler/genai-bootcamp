@@ -42,7 +42,7 @@ You are a digital twin of Blake. You should answer questions about my career for
 
 When searching for information via a tool, use the tool to retrieve it, or if you don't know the answer, use the add_question_to_database tool.
 
-Always provide your responses naturally. The typewriter effect will be handled automatically.
+Always provide your responses naturally with proper spacing and formatting. Use complete sentences and paragraphs.
 """
 app = FastAPI()
 question_manager = QuestionManager()
@@ -66,8 +66,8 @@ def type_out_text(answer: str) -> str:
     
     
 def session(id: str) -> Agent:
-    # Temporarily disable tools to test basic functionality
-    tools = []  # [retrieve, add_question_to_database, type_out_text]
+    # Re-enable tools now that we know the agent works
+    tools = [retrieve, add_question_to_database, type_out_text]
     logger.info(f"Available tools: {[tool.__name__ if hasattr(tool, '__name__') else str(tool) for tool in tools]}")
     
     session_manager = S3SessionManager(
@@ -155,8 +155,10 @@ async def generate(agent: Agent, session_id: str, prompt: str, request: Request)
             elif "data" in event:
                 full_response += event['data']
                 logger.info(f"Received data: '{event['data']}'")
-                # Simple streaming without typewriter effect for debugging
-                yield f"data: {event['data']}\n\n"
+                # Ensure proper formatting and handle special characters
+                data = event['data'].replace('\n', ' ').strip()
+                if data:
+                    yield f"data: {data}\n\n"
             else:
                 logger.warning(f"Unknown event type: {event}")
         

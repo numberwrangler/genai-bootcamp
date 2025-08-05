@@ -331,17 +331,19 @@
                             const data = line.slice(6).trim();
                             if (data === '[DONE]' || data === '') continue;
                             
-                            // Add the character directly (no JSON parsing needed)
-                            assistantMessage += data;
-                            
-                            if (!messageElement) {
-                                messageElement = createMessageElement('assistant', '');
-                                messagesContainer.appendChild(messageElement);
+                            // Add the data with proper spacing
+                            if (data && data.trim()) {
+                                assistantMessage += data + ' ';
+                                
+                                if (!messageElement) {
+                                    messageElement = createMessageElement('assistant', '');
+                                    messagesContainer.appendChild(messageElement);
+                                }
+                                
+                                const bubble = messageElement.querySelector('.message-bubble');
+                                bubble.textContent = assistantMessage.trim();
+                                scrollToBottom();
                             }
-                            
-                            const bubble = messageElement.querySelector('.message-bubble');
-                            bubble.innerHTML = assistantMessage + '<span class="cursor">|</span>';
-                            scrollToBottom();
                         }
                     }
                 }
