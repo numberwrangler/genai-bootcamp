@@ -5,7 +5,7 @@ from strands.agent.conversation_manager import SlidingWindowConversationManager
 from strands import Agent, tool
 from strands.models import BedrockModel
 from strands.session.s3_session_manager import S3SessionManager
-from strands_tools import retrieve
+from strands_tools import retrieve, stream
 import boto3
 import json
 import logging
@@ -42,7 +42,7 @@ You are a digital twin of Blake. You should answer questions about my career for
 
 When searching for information via a tool, use the tool to retrieve it, or if you don't know the answer, use the tool add_question_to_database tool.
 Return the question_id.
-WHen typing the answer out use tool type_set_text.
+WHen typing the answer out use tool stream.
 
 """
 app = FastAPI()
@@ -56,16 +56,16 @@ def add_question_to_database(question: str) -> str:
     new_question = question_manager.add_question(question=question)
     return f"Question stored with ID: {new_question.question_id}. Awaiting answer."
 
-@tool
-def type_out_text(text, delay=0.05):
-        for char in text:
-            print(char, end='', flush=True)  # Print character without newline, flush buffer
-            time.sleep(delay)
-        print()  # Print a newline at the end of the text
+# @tool
+# def type_out_text(text, delay=0.05):
+#         for char in text:
+#             print(char, end='', flush=True)  # Print character without newline, flush buffer
+#             time.sleep(delay)
+#         print()  # Print a newline at the end of the text
     
     
 def session(id: str) -> Agent:
-    tools = [retrieve, add_question_to_database, type_set_text]
+    tools = [retrieve, add_question_to_database, stream]
     session_manager = S3SessionManager(
         boto_session=boto_session,
         bucket=state_bucket_name,
