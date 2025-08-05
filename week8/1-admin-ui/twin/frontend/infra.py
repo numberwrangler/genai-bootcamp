@@ -1,94 +1,157 @@
-from aws_cdk.aws_dynamodb import TableV2
-from aws_cdk import Duration, BundlingOptions, Fn, Stack
+from sys import prefix
+
+from aws_cdk.aws_certificatemanager import Certificate
+import aws_cdk as cdk
+from aws_cdk import BundlingFileAccess, BundlingOptions, DockerImage, Duration, RemovalPolicy
 from constructs import Construct
-import aws_cdk.aws_iam as iam
-import aws_cdk.aws_lambda as _lambda
+import json
+import aws_cdk.aws_cloudfront as cloudfront
+import aws_cdk.aws_cloudfront_origins as origins
 import aws_cdk.aws_s3 as s3
-import aws_cdk.aws_sns as sns
+import aws_cdk.aws_s3_deployment as s3deploy
 
-
-class Backend(Construct):
-    endpoint: str
+class Frontend(Construct):
     domain_name: str
 
-    def __init__(self, scope: Construct, id: str,
-                 kb_arn: str, # Bedrock Knowledge Base ARN
-                 kb_id: str,  # Bedrock Knowledge Base ID
-                 dynamo_db_table: TableV2, # Used to store unanswered questions
-                 ) -> None:
-        super().__init__(scope, id)
+    def __init__(self, scope: Construct, id: str, 
+                 backend_endpoint: str, 
+                 admin_endpoint: str,
+                 user_pool_id: str,
+                 user_pool_client_id: str,
+                 custom_certificate_arn: str|None = None,
+                 custom_domain_name: str|None = None,
+                 **kwargs) -> None:
+        super().__init__(scope, id, **kwargs)
 
-        state_bucket = s3.Bucket(self, 'StateBucket')
-        notification_topic = sns.Topic(self, 'StateNotificationTopic')
-        fn = _lambda.Function(self, 'StateFunction',
-                              function_name='Twin',
-                              timeout=Duration.seconds(120),
-                              architecture=_lambda.Architecture.X86_64,
-                              runtime=_lambda.Runtime.PYTHON_3_13,
-                              handler='run.sh',
-                              code=_lambda.Code.from_asset('twin/backend/src',
-                                    bundling=BundlingOptions(
-                                        image=_lambda.Runtime.PYTHON_3_13.bundling_image,
-                                        command=[
-                                            'bash', '-c',
-                                            'pip install uv && uv export --frozen --no-dev --no-editable -o requirements.txt && pip install -r requirements.txt -t /asset-output && cp -r app/* /asset-output/'
-                                        ],
-                                        user='root',
-                                        platform='linux/amd64',
-                                    ),
-                              ),
-                              layers=[
-                                    _lambda.LayerVersion.from_layer_version_arn(
-                                        self,
-                                        'LambdaAdapterLayer',
-                                        f'arn:aws:lambda:{Stack.of(self).region}:753240598075:layer:LambdaAdapterLayerX86:25'
-                                    )
-                              ],
-                              environment={
-                                    "AWS_LAMBDA_EXEC_WRAPPER": "/opt/bootstrap",
-                                    "AWS_LWA_INVOKE_MODE": "response_stream",
-                                    "DDB_TABLE": dynamo_db_table.table_name,
-                                    "KNOWLEDGE_BASE_ID": kb_id,
-                                    "MODEL_ID": "us.anthropic.claude-sonnet-4-20250514-v1:0",
-                                    "PORT": "8000",
-                                    "STATE_BUCKET": state_bucket.bucket_name,
-                                    "NOTIFICATION_TOPIC_ARN": notification_topic.topic_arn,
-                                },
-                              memory_size=1024,
-                             )
+        frontend_bucket = s3.Bucket(self, 'FrontendBucket')
+        admin_frontend_bucket = s3.Bucket(self, 'AdminFrontendBucket')
 
-        _ = state_bucket.grant_read_write(fn)
-        _ = dynamo_db_table.grant_read_write_data(fn)
-        _ = notification_topic.grant_publish(fn)
-        # Add Bedrock permissions to the Lambda function
-        fn.add_to_role_policy(
-            iam.PolicyStatement(
-                effect=iam.Effect.ALLOW,
-                actions=[
-                    "bedrock:InvokeModelWithResponseStream",
-                    "bedrock:InvokeModel"
-                ],
-                resources=["*"]
-            )
-        )
-        fn.add_to_role_policy(
-            iam.PolicyStatement(
-                effect=iam.Effect.ALLOW,
-                actions=[
-                    "bedrock:RetrieveAndGenerate",
-                    "bedrock:Retrieve",
-                ],
-                resources=[kb_arn]
-            )
+        s3_origin = origins.S3BucketOrigin.with_origin_access_control(frontend_bucket,
+                                                                       origin_access_levels=[cloudfront.AccessLevel.READ, cloudfront.AccessLevel.LIST],
+                                                                      )
+        admin_s3_origin = origins.S3BucketOrigin.with_origin_access_control(admin_frontend_bucket,
+                                                                       origin_access_levels=[cloudfront.AccessLevel.READ, cloudfront.AccessLevel.LIST],
+                                                                      )
+        origin_request_policy = cloudfront.OriginRequestPolicy(self, "OriginRequestPolicy",
+                                                               cookie_behavior=cloudfront.OriginRequestCookieBehavior.all(),
+                                                               query_string_behavior=cloudfront.OriginRequestQueryStringBehavior.all(),
+                                                               )
+        backend_origin = origins.HttpOrigin(
+            domain_name=backend_endpoint,
+            read_timeout=Duration.seconds(60),
+            keepalive_timeout=Duration.seconds(60),
+            connection_timeout=Duration.seconds(10),
         )
 
-        fn_url = fn.add_function_url(
-                auth_type=_lambda.FunctionUrlAuthType.NONE,
-                invoke_mode=_lambda.InvokeMode.RESPONSE_STREAM,
-                cors=_lambda.FunctionUrlCorsOptions(
-                    allowed_methods=[_lambda.HttpMethod.ALL],
-                    allowed_origins=['*'],
-                ),
-            )
-        self.endpoint = fn_url.url
-        self.domain_name = Fn.select(2, Fn.split('/', self.endpoint)) # Remove the protocol part from the URL
+        admin_origin = origins.HttpOrigin(
+            domain_name=admin_endpoint,
+            read_timeout=Duration.seconds(11),
+            keepalive_timeout=Duration.seconds(2),
+            connection_timeout=Duration.seconds(5),
+        )
+        
+        rewrite_function = cloudfront.Function(self, "RewriteFunction",
+            code=cloudfront.FunctionCode.from_inline("""
+function handler(event) {
+    var request = event.request;
+    var uri = request.uri;
+
+    // If it is a path for the admin SPA and does not have a file extension in the last path segment,
+    // rewrite to the admin index page to support client-side routing.
+    if (uri.startsWith('/admin') && !/\\.[^/]+$/.test(uri)) {
+        request.uri = '/admin/index.html';
+    }
+    return request;
+}
+"""))
+        domain_names = []
+        certificate = None
+        if custom_certificate_arn and custom_domain_name:
+            domain_names = [custom_domain_name]
+            certificate = Certificate.from_certificate_arn(self, 'CustomCertificate', custom_certificate_arn)
+        
+        distribution = cloudfront.Distribution(self, 'Distribution',
+                                                            certificate=certificate,
+                                                            domain_names=domain_names,
+                                                            default_root_object='index.html',
+                                                            default_behavior=cloudfront.BehaviorOptions(
+                                                                origin=s3_origin,
+                                                                viewer_protocol_policy=cloudfront.ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
+                                                                function_associations=[cloudfront.FunctionAssociation(
+                                                                    function=rewrite_function,
+                                                                    event_type=cloudfront.FunctionEventType.VIEWER_REQUEST
+                                                                )]
+                                                            ),
+                                                            additional_behaviors={
+                                                                '/admin/*': cloudfront.BehaviorOptions(
+                                                                    origin=admin_s3_origin,
+                                                                    viewer_protocol_policy=cloudfront.ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
+                                                                    function_associations=[cloudfront.FunctionAssociation(
+                                                                        function=rewrite_function,
+                                                                        event_type=cloudfront.FunctionEventType.VIEWER_REQUEST
+                                                                    )]
+                                                                ),
+                                                                '/api/*': cloudfront.BehaviorOptions(
+                                                                    origin=backend_origin,
+                                                                    viewer_protocol_policy=cloudfront.ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
+                                                                    origin_request_policy=origin_request_policy,
+                                                                    allowed_methods=cloudfront.AllowedMethods.ALLOW_ALL,
+                                                                    cache_policy=cloudfront.CachePolicy.CACHING_DISABLED
+                                                                ),
+                                                                '/adminapi/*': cloudfront.BehaviorOptions(
+                                                                    origin=admin_origin,
+                                                                    viewer_protocol_policy=cloudfront.ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
+                                                                    origin_request_policy=cloudfront.OriginRequestPolicy.from_origin_request_policy_id(self, 'AllViewerExceptHostHeader', 'b689b0a8-53d0-40ab-baf2-68738e2966ac'),
+                                                                    allowed_methods=cloudfront.AllowedMethods.ALLOW_ALL,
+                                                                    cache_policy=cloudfront.CachePolicy.CACHING_DISABLED
+                                                                )
+                                                            }
+                                              )
+        
+        _ = s3deploy.BucketDeployment(self, 'DeployFrontend',
+                                      sources=[s3deploy.Source.asset('./twin/frontend/src')],
+                                      destination_bucket=frontend_bucket,
+                                      distribution=distribution,
+                                      distribution_paths=['/'],
+                                     )
+
+        _ = s3deploy.BucketDeployment(self, 'DeployAdminFrontend',
+                                      sources=[s3deploy.Source.asset('./twin/frontend/admin', bundling=BundlingOptions(
+                                          bundling_file_access=BundlingFileAccess.VOLUME_COPY,
+                                          image=DockerImage.from_registry('node:22'),
+                                          user="root",
+                                          command=[
+                                              "sh", "-c",
+                                              "npm ci && npm run build && cp -r build/* /asset-output/"
+                                          ],
+                                          working_directory="/asset-input",
+                                      ))],
+                                      destination_bucket=admin_frontend_bucket,
+                                      destination_key_prefix='admin/',
+                                      distribution=distribution,
+                                      distribution_paths=['/admin/*'],
+                                      exclude=['_app/env.js']
+                                     )
+
+        env_js_content = cdk.Fn.join('', [
+            'export const env={"PUBLIC_VITE_COGNITO_USER_POOL_ID":"',
+            user_pool_id,
+            '","PUBLIC_VITE_COGNITO_USER_POOL_CLIENT_ID":"',
+            user_pool_client_id,
+            '"}'
+        ])
+
+        _ = s3deploy.BucketDeployment(self, 'DeployAdminEnv',
+                                      sources=[s3deploy.Source.data(
+                                          '_app/env.js',
+                                          env_js_content
+                                      )],
+                                      destination_bucket=admin_frontend_bucket,
+                                      destination_key_prefix='admin',
+                                      distribution=distribution,
+                                      distribution_paths=['/admin/_app/env.js'],
+                                      content_type='application/javascript'
+                                      )
+
+        
+        self.domain_name = distribution.distribution_domain_name
