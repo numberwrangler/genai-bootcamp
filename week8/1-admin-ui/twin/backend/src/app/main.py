@@ -107,18 +107,62 @@ async def chat(chat_request: ChatRequest, request: Request):
 
 async def generate(agent: Agent, session_id: str, prompt: str, request: Request):
     try:
-        # Clean up any empty messages before processing
+        # Clean up any empty messages and orphaned tool_use blocks
         original_count = len(agent.messages)
+        
+        # Remove empty messages
         agent.messages = [msg for msg in agent.messages if 
                          msg.get("content") and 
                          len(msg["content"]) > 0 and 
                          msg["content"][0].get("text", "").strip()]
+        
+        # Remove orphaned tool_use blocks (tool_use without corresponding tool_result)
+        cleaned_messages = []
+        i = 0
+        while i < len(agent.messages):
+            current_msg = agent.messages[i]
+            
+            # Check if current message has tool_use blocks
+            if (current_msg.get("content") and 
+                any("tool_use" in content for content in current_msg["content"])):
+                
+                # Look for tool_result in next message
+                if i + 1 < len(agent.messages):
+                    next_msg = agent.messages[i + 1]
+                    if (next_msg.get("content") and 
+                        any("tool_result" in content for content in next_msg["content"])):
+                        # Tool use has result, keep both messages
+                        cleaned_messages.append(current_msg)
+                        cleaned_messages.append(next_msg)
+                        i += 2  # Skip next message as we've already added it
+                        continue
+                    else:
+                        # Tool use has no result, skip this message
+                        logger.warning(f"Removing orphaned tool_use message at index {i}")
+                        i += 1
+                        continue
+                else:
+                    # Tool use is at the end, skip it
+                    logger.warning(f"Removing orphaned tool_use message at end of conversation")
+                    i += 1
+                    continue
+            else:
+                # Regular message, keep it
+                cleaned_messages.append(current_msg)
+                i += 1
+        
+        agent.messages = cleaned_messages
         cleaned_count = len(agent.messages)
         if original_count != cleaned_count:
-            logger.info(f"Cleaned {original_count - cleaned_count} empty messages from conversation history")
+            logger.info(f"Cleaned {original_count - cleaned_count} problematic messages from conversation history")
         
         # Log message count for debugging
         logger.info(f"Processing chat with {len(agent.messages)} messages in history")
+        
+        # If we still have too many messages or suspect issues, start fresh
+        if len(agent.messages) > 10:
+            logger.warning("Too many messages in history, starting fresh conversation")
+            agent.messages = []
         
         full_response = ""
         async for event in agent.stream_async(prompt):
@@ -157,6 +201,20 @@ def chat_get(request: Request):
         content=json.dumps({
             "messages": filtered_messages,
         }),
+        media_type="application/json",
+    )
+    response.set_cookie(key="session_id", value=session_id)
+    return response
+
+@app.post('/api/clear')
+def clear_chat(request: Request):
+    """Clear the conversation history for the current session"""
+    session_id = request.cookies.get("session_id", str(uuid.uuid4()))
+    agent = session(session_id)
+    agent.messages = []
+    
+    response = Response(
+        content=json.dumps({"message": "Conversation history cleared"}),
         media_type="application/json",
     )
     response.set_cookie(key="session_id", value=session_id)
