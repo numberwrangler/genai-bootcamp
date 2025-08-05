@@ -105,13 +105,7 @@ function handler(event) {
                                                                     allowed_methods=cloudfront.AllowedMethods.ALLOW_ALL,
                                                                     cache_policy=cloudfront.CachePolicy.CACHING_DISABLED
                                                                 ),
-                                                                '/images/*': cloudfront.BehaviorOptions(
-                                                                    origin=backend_origin,
-                                                                    viewer_protocol_policy=cloudfront.ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
-                                                                    origin_request_policy=origin_request_policy,
-                                                                    allowed_methods=cloudfront.AllowedMethods.ALLOW_GET_HEAD,
-                                                                    cache_policy=cloudfront.CachePolicy.CACHING_OPTIMIZED
-                                                                )
+
                                                             }
                                               )
         
