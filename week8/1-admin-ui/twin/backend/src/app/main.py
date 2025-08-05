@@ -107,7 +107,7 @@ async def generate(agent: Agent, session_id: str, prompt: str, request: Request)
                 full_response += event['data']
                 # Create typewriter effect by yielding one character at a time
                 for char in event['data']:
-                    yield f"data: {json.dumps(char)}\n\n"
+                    yield f"data: {char}\n\n"
                     # Add a small delay for typewriter effect
                     await asyncio.sleep(0.03)  # 30ms delay between characters
     except Exception as e:

@@ -331,33 +331,17 @@
                             const data = line.slice(6).trim();
                             if (data === '[DONE]' || data === '') continue;
                             
-                            try {
-                                // Parse the JSON-encoded string to get the actual text
-                                const textChunk = JSON.parse(data);
-                                assistantMessage += textChunk;
-                                
-                                if (!messageElement) {
-                                    messageElement = createMessageElement('assistant', '');
-                                    messagesContainer.appendChild(messageElement);
-                                }
-                                
-                                const bubble = messageElement.querySelector('.message-bubble');
-                                bubble.innerHTML = assistantMessage + '<span class="cursor">|</span>';
-                                scrollToBottom();
-                            } catch (e) {
-                                // If JSON parsing fails, treat as plain text (fallback)
-                                console.warn('Failed to parse JSON chunk:', data);
-                                assistantMessage += data;
-                                
-                                if (!messageElement) {
-                                    messageElement = createMessageElement('assistant', '');
-                                    messagesContainer.appendChild(messageElement);
-                                }
-                                
-                                const bubble = messageElement.querySelector('.message-bubble');
-                                bubble.innerHTML = assistantMessage + '<span class="cursor">|</span>';
-                                scrollToBottom();
+                            // Add the character directly (no JSON parsing needed)
+                            assistantMessage += data;
+                            
+                            if (!messageElement) {
+                                messageElement = createMessageElement('assistant', '');
+                                messagesContainer.appendChild(messageElement);
                             }
+                            
+                            const bubble = messageElement.querySelector('.message-bubble');
+                            bubble.innerHTML = assistantMessage + '<span class="cursor">|</span>';
+                            scrollToBottom();
                         }
                     }
                 }
