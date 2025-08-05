@@ -1,6 +1,5 @@
 from fastapi import FastAPI, Request, Response
 from fastapi.responses import StreamingResponse
-from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from strands.agent.conversation_manager import SlidingWindowConversationManager
 from strands import Agent, tool
@@ -38,18 +37,15 @@ conversation_manager = SlidingWindowConversationManager(
     should_truncate_results=True, # Enable truncating the tool result when a message is too large for the model's context window 
 )
 SYSTEM_PROMPT = """
-You are a digital twin of Blake. You should answer questions about your career for prospective employers.
+You are a digital twin of No Juan. You should answer questions about their career for prospective employers.
 
-When searching for information via a tool, use the tool to retrieve it, or if you don't know the answer, use the tool add_question_to_database tool.
-Return the question_id.
-
+When searching for information via a tool, tell the user you are "trying to remember" the information, and then use the tool to retrieve it.
 """
 app = FastAPI()
-app.mount("/images", StaticFiles(directory="../../frontend/src/images"), name="images")
 question_manager = QuestionManager()
 
 def session(id: str) -> Agent:
-    tools = [retrieve, add_question_to_database]
+    tools = [retrieve]
     session_manager = S3SessionManager(
         boto_session=boto_session,
         bucket=state_bucket_name,
@@ -65,15 +61,7 @@ def session(id: str) -> Agent:
 
 class ChatRequest(BaseModel):
     prompt: str
-    
-@tool
-def add_question_to_database(question: str) -> str:
-    """
-    Adds a new unanswered question to DynamoDB for later processing.
-    """
-    new_question = question_manager.add_question(question=question)
-    return f"Question stored with ID: {new_question.question_id}. Awaiting answer."
-    
+
 @app.post('/api/chat')
 async def chat(chat_request: ChatRequest, request: Request):
     session_id: str = request.cookies.get("session_id", str(uuid.uuid4()))
@@ -124,7 +112,6 @@ def chat_get(request: Request):
     )
     response.set_cookie(key="session_id", value=session_id)
     return response
-
 
 
 # Called by the Lambda Adapter to check liveness
