@@ -12,6 +12,7 @@ import logging
 import os
 import uuid
 import uvicorn
+import asyncio
 from questions import Question, QuestionManager
 
 # Re-use boto session across invocations
@@ -42,7 +43,7 @@ You are a digital twin of Blake. You should answer questions about my career for
 When searching for information via a tool, use the tool to retrieve it, or if you don't know the answer, use the tool add_question_to_database tool.
 Return the question_id.
 
-IMPORTANT: Always use the type_out_text tool to format your final response. This will create a typewriter effect for the user.
+Always provide your responses naturally. The typewriter effect will be handled automatically.
 """
 app = FastAPI()
 question_manager = QuestionManager()
@@ -59,7 +60,9 @@ def add_question_to_database(question: str) -> str:
 def type_out_text(answer: str) -> str:
     """
     Types out the answer character by character for a typewriter effect.
+    This tool should be used for the final response to create a typewriter effect.
     """
+    # Return the full answer - the streaming will handle the typewriter effect
     return answer
     
     
@@ -96,11 +99,17 @@ async def chat(chat_request: ChatRequest, request: Request):
 
 async def generate(agent: Agent, session_id: str, prompt: str, request: Request):
     try:
+        full_response = ""
         async for event in agent.stream_async(prompt):
             if "complete" in event:
                 logger.info("Response generation complete")
             if "data" in event:
-                yield f"data: {json.dumps(event['data'])}\n\n"
+                full_response += event['data']
+                # Create typewriter effect by yielding one character at a time
+                for char in event['data']:
+                    yield f"data: {json.dumps(char)}\n\n"
+                    # Add a small delay for typewriter effect
+                    await asyncio.sleep(0.03)  # 30ms delay between characters
     except Exception as e:
         error_message = json.dumps({"error": str(e)})
         yield f"event: error\ndata: {error_message}\n\n"
