@@ -34,7 +34,7 @@ bedrock_model = BedrockModel(
 )
 current_agent: Agent | None = None
 conversation_manager = SlidingWindowConversationManager(
-    window_size=10,  # Maximum number of messages to keep
+    window_size=5,  # Reduced maximum number of messages to keep
     should_truncate_results=True, # Enable truncating the tool result when a message is too large for the model's context window 
 )
 SYSTEM_PROMPT = """
@@ -86,12 +86,20 @@ class ChatRequest(BaseModel):
 
 @app.post('/api/chat')
 async def chat(chat_request: ChatRequest, request: Request):
+    # Validate that the prompt is not empty
+    if not chat_request.prompt or not chat_request.prompt.strip():
+        return Response(
+            content=json.dumps({"error": "Prompt cannot be empty"}),
+            media_type="application/json",
+            status_code=400
+        )
+    
     session_id: str = request.cookies.get("session_id", str(uuid.uuid4()))
     agent = session(session_id)
     global current_agent
     current_agent = agent  # Store the current agent for use in tools
     response = StreamingResponse(
-        generate(agent, session_id, chat_request.prompt, request),
+        generate(agent, session_id, chat_request.prompt.strip(), request),
         media_type="text/event-stream"
     )
     response.set_cookie(key="session_id", value=session_id)
@@ -99,6 +107,19 @@ async def chat(chat_request: ChatRequest, request: Request):
 
 async def generate(agent: Agent, session_id: str, prompt: str, request: Request):
     try:
+        # Clean up any empty messages before processing
+        original_count = len(agent.messages)
+        agent.messages = [msg for msg in agent.messages if 
+                         msg.get("content") and 
+                         len(msg["content"]) > 0 and 
+                         msg["content"][0].get("text", "").strip()]
+        cleaned_count = len(agent.messages)
+        if original_count != cleaned_count:
+            logger.info(f"Cleaned {original_count - cleaned_count} empty messages from conversation history")
+        
+        # Log message count for debugging
+        logger.info(f"Processing chat with {len(agent.messages)} messages in history")
+        
         full_response = ""
         async for event in agent.stream_async(prompt):
             if "complete" in event:
