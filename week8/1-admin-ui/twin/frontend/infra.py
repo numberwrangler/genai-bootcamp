@@ -104,6 +104,13 @@ function handler(event) {
                                                                     origin_request_policy=cloudfront.OriginRequestPolicy.from_origin_request_policy_id(self, 'AllViewerExceptHostHeader', 'b689b0a8-53d0-40ab-baf2-68738e2966ac'),
                                                                     allowed_methods=cloudfront.AllowedMethods.ALLOW_ALL,
                                                                     cache_policy=cloudfront.CachePolicy.CACHING_DISABLED
+                                                                ),
+                                                                '/images/*': cloudfront.BehaviorOptions(
+                                                                    origin=backend_origin,
+                                                                    viewer_protocol_policy=cloudfront.ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
+                                                                    origin_request_policy=origin_request_policy,
+                                                                    allowed_methods=cloudfront.AllowedMethods.ALLOW_GET_HEAD,
+                                                                    cache_policy=cloudfront.CachePolicy.CACHING_OPTIMIZED
                                                                 )
                                                             }
                                               )
