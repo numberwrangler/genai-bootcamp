@@ -68,6 +68,8 @@ def type_out_text(answer: str) -> str:
     
 def session(id: str) -> Agent:
     tools = [retrieve, add_question_to_database, type_out_text]
+    logger.info(f"Available tools: {[tool.__name__ if hasattr(tool, '__name__') else str(tool) for tool in tools]}")
+    
     session_manager = S3SessionManager(
         boto_session=boto_session,
         bucket=state_bucket_name,
@@ -116,42 +118,10 @@ async def generate(agent: Agent, session_id: str, prompt: str, request: Request)
                          len(msg["content"]) > 0 and 
                          msg["content"][0].get("text", "").strip()]
         
-        # Remove orphaned tool_use blocks (tool_use without corresponding tool_result)
-        cleaned_messages = []
-        i = 0
-        while i < len(agent.messages):
-            current_msg = agent.messages[i]
-            
-            # Check if current message has tool_use blocks
-            if (current_msg.get("content") and 
-                any("tool_use" in content for content in current_msg["content"])):
-                
-                # Look for tool_result in next message
-                if i + 1 < len(agent.messages):
-                    next_msg = agent.messages[i + 1]
-                    if (next_msg.get("content") and 
-                        any("tool_result" in content for content in next_msg["content"])):
-                        # Tool use has result, keep both messages
-                        cleaned_messages.append(current_msg)
-                        cleaned_messages.append(next_msg)
-                        i += 2  # Skip next message as we've already added it
-                        continue
-                    else:
-                        # Tool use has no result, skip this message
-                        logger.warning(f"Removing orphaned tool_use message at index {i}")
-                        i += 1
-                        continue
-                else:
-                    # Tool use is at the end, skip it
-                    logger.warning(f"Removing orphaned tool_use message at end of conversation")
-                    i += 1
-                    continue
-            else:
-                # Regular message, keep it
-                cleaned_messages.append(current_msg)
-                i += 1
-        
-        agent.messages = cleaned_messages
+        # Simple cleanup - just remove empty messages, don't touch tool calls
+        agent.messages = [msg for msg in agent.messages if 
+                         msg.get("content") and 
+                         len(msg["content"]) > 0]
         cleaned_count = len(agent.messages)
         if original_count != cleaned_count:
             logger.info(f"Cleaned {original_count - cleaned_count} problematic messages from conversation history")
@@ -166,9 +136,21 @@ async def generate(agent: Agent, session_id: str, prompt: str, request: Request)
         
         full_response = ""
         async for event in agent.stream_async(prompt):
+            logger.info(f"Stream event: {event}")  # Debug logging
+            
             if "complete" in event:
                 logger.info("Response generation complete")
-            if "data" in event:
+            elif "tool_use" in event:
+                # Handle tool calls - show that a tool is being used
+                tool_name = event.get("tool_use", {}).get("name", "unknown tool")
+                logger.info(f"Tool being used: {tool_name}")
+                yield f"data: [Using {tool_name}...]\n\n"
+            elif "tool_result" in event:
+                # Handle tool results - show the result
+                tool_result = event.get("tool_result", {}).get("content", "No result")
+                logger.info(f"Tool result received: {tool_result[:100]}...")
+                yield f"data: [Tool result: {tool_result}]\n\n"
+            elif "data" in event:
                 full_response += event['data']
                 # Create typewriter effect by yielding one character at a time
                 for char in event['data']:
@@ -219,6 +201,34 @@ def clear_chat(request: Request):
     )
     response.set_cookie(key="session_id", value=session_id)
     return response
+
+@app.get('/api/test-tools')
+def test_tools(request: Request):
+    """Test if tools are working properly"""
+    try:
+        # Test the retrieve tool
+        test_result = retrieve("test query")
+        logger.info(f"Retrieve tool test result: {test_result}")
+        
+        # Test the add_question_to_database tool
+        test_question = add_question_to_database("test question")
+        logger.info(f"Add question tool test result: {test_question}")
+        
+        return Response(
+            content=json.dumps({
+                "message": "Tools tested successfully",
+                "retrieve_result": str(test_result),
+                "add_question_result": str(test_question)
+            }),
+            media_type="application/json",
+        )
+    except Exception as e:
+        logger.error(f"Tool test failed: {e}")
+        return Response(
+            content=json.dumps({"error": f"Tool test failed: {str(e)}"}),
+            media_type="application/json",
+            status_code=500
+        )
 
 
 # Called by the Lambda Adapter to check liveness
