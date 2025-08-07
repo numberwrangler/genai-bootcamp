@@ -19,6 +19,6 @@ _ = Twin(app, "Twin",
          custom_certificate_arn="arn:aws:acm:us-east-1:845422352941:certificate/cc28962c-4c16-46ee-ae43-f36c5c8b6a51"  # Replace with your certificate ARN
 )
 
-        )
+  )
 
 app.synth()
