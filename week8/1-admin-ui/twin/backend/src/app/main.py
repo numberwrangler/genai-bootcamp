@@ -44,7 +44,7 @@ bedrock_model = BedrockModel(
 )
 current_agent: Agent | None = None
 conversation_manager = SlidingWindowConversationManager(
-    window_size=5,  # Reduced maximum number of messages to keep
+    window_size=3,  # Further reduced to improve performance
     should_truncate_results=True, # Enable truncating the tool result when a message is too large for the model's context window 
 )
 SYSTEM_PROMPT = """
@@ -187,14 +187,14 @@ async def generate(agent: Agent, session_id: str, prompt: str, request: Request)
         logger.info(f"Processing chat with {len(agent.messages)} messages in history")
         
         # If we still have too many messages, start fresh
-        if len(agent.messages) > 10:
+        if len(agent.messages) > 6:
             logger.warning("Too many messages in history, starting fresh conversation")
             agent.messages = []
         
         full_response = ""
         event_count = 0
         timeout_count = 0
-        max_timeout = 30  # 30 seconds timeout
+        max_timeout = 15  # Reduced to 15 seconds timeout
         
         try:
             async for event in agent.stream_async(prompt):
@@ -226,8 +226,8 @@ async def generate(agent: Agent, session_id: str, prompt: str, request: Request)
                 else:
                     logger.warning(f"Unknown event type: {event}")
                 
-                # Add timeout protection
-                await asyncio.sleep(0.1)  # Small delay to prevent blocking
+                # Add timeout protection - reduced delay
+                await asyncio.sleep(0.01)  # Minimal delay to prevent blocking
                 
             logger.info(f"Total events processed: {event_count}")
             if event_count == 0:
@@ -457,7 +457,9 @@ async def health_check():
                 "status": "healthy",
                 "message": "Backend is running",
                 "model_id": model_id,
-                "bucket": state_bucket_name
+                "bucket": state_bucket_name,
+                "conversation_window": 3,
+                "timeout": 15
             }),
             media_type="application/json",
         )
@@ -467,6 +469,43 @@ async def health_check():
             content=json.dumps({
                 "status": "unhealthy",
                 "error": str(e)
+            }),
+            media_type="application/json",
+            status_code=500
+        )
+
+@app.get("/api/performance-test")
+async def performance_test():
+    """Test response time"""
+    start_time = time.time()
+    try:
+        session_id = str(uuid.uuid4())
+        agent = session(session_id)
+        
+        # Simple test prompt
+        test_prompt = "Hello"
+        response = agent(test_prompt)
+        
+        end_time = time.time()
+        response_time = end_time - start_time
+        
+        return Response(
+            content=json.dumps({
+                "status": "success",
+                "response_time_seconds": round(response_time, 2),
+                "response_length": len(str(response))
+            }),
+            media_type="application/json",
+        )
+    except Exception as e:
+        end_time = time.time()
+        response_time = end_time - start_time
+        logger.error(f"Performance test failed: {e}")
+        return Response(
+            content=json.dumps({
+                "status": "error",
+                "error": str(e),
+                "response_time_seconds": round(response_time, 2)
             }),
             media_type="application/json",
             status_code=500
