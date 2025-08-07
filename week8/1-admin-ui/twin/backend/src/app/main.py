@@ -48,13 +48,19 @@ conversation_manager = SlidingWindowConversationManager(
     should_truncate_results=True, # Enable truncating the tool result when a message is too large for the model's context window 
 )
 SYSTEM_PROMPT = """
-You are a digital twin of Blake. You should answer questions about my career for prospective employers. Answer as though I am talking. Do not give out any PII information.
+You are a digital twin of Blake. You should answer questions about my career for prospective employers. Answer as though I am talking and do not refer to Blake say I. Do not give out any PII information.
 
-IMPORTANT: When you don't know the answer to a question or need more information, you MUST use the add_question_to_database tool to store the question for later processing. This ensures that unknown questions are captured and can be answered later.
+CRITICAL INSTRUCTION: You have access to the add_question_to_database tool. You MUST use this tool in the following situations:
+1. When you don't know the answer to a question
+2. When you're unsure about specific details
+3. When you need more information to provide a complete answer
+4. When the retrieve tool doesn't provide sufficient information
 
-When searching for information via a tool, use the retrieve tool to find relevant information. If the retrieve tool doesn't provide the answer you need, use the add_question_to_database tool to store the question.
+DO NOT just say "I don't know" or "I'm not sure" - ALWAYS use the add_question_to_database tool to store the question for later processing.
 
-Always provide your responses naturally with proper spacing and formatting. Use complete sentences and paragraphs. Do not display tool calls as text - use the actual tools.
+When searching for information, first try the retrieve tool. If that doesn't give you a complete answer, use add_question_to_database to store the question.
+
+Always provide your responses naturally with proper spacing and formatting. Use complete sentences and paragraphs. Use the actual tools, don't just mention them.
 """
 app = FastAPI()
 question_manager = QuestionManager()
@@ -66,8 +72,14 @@ def add_question_to_database(question: str) -> str:
     Use this tool whenever you cannot provide a complete or accurate answer to a user's question.
     The question will be stored for later processing and answering.
     """
-    new_question = question_manager.add_question(question=question)
-    return f"Question stored with ID: {new_question.question_id}. This question has been saved for later processing and will be answered when more information becomes available."
+    logger.info(f"add_question_to_database tool called with question: {question}")
+    try:
+        new_question = question_manager.add_question(question=question)
+        logger.info(f"Successfully stored question with ID: {new_question.question_id}")
+        return f"Question stored with ID: {new_question.question_id}. This question has been saved for later processing and will be answered when more information becomes available."
+    except Exception as e:
+        logger.error(f"Error storing question: {e}")
+        return f"Error storing question: {str(e)}"
 
 @tool
 def type_out_text(answer: str) -> str:
@@ -204,15 +216,13 @@ async def generate(agent: Agent, session_id: str, prompt: str, request: Request)
                 elif "data" in event:
                     full_response += event['data']
                     logger.info(f"Received data: '{event['data']}'")
-                    # Ensure proper formatting and handle special characters
-                    data = event['data'].replace('\n', ' ').strip()
-                    # Fix common spacing issues
-                    data = data.replace('  ', ' ')  # Remove double spaces
-                    data = data.replace(' ,', ',')  # Fix space before comma
-                    data = data.replace(' .', '.')  # Fix space before period
-                    data = data.replace(' ?', '?')  # Fix space before question mark
-                    data = data.replace(' !', '!')  # Fix space before exclamation
+                    
+                    # Get the raw data without excessive processing
+                    data = event['data']
+                    
+                    # Only do minimal processing to avoid breaking the text
                     if data:
+                        # Don't strip or replace characters that might break words
                         yield f"data: {data}\n\n"
                 else:
                     logger.warning(f"Unknown event type: {event}")
@@ -359,6 +369,37 @@ def test_agent(request: Request):
         logger.error(f"Agent test failed: {e}")
         return Response(
             content=json.dumps({"error": f"Agent test failed: {str(e)}"}),
+            media_type="application/json",
+            status_code=500
+        )
+
+@app.get('/api/test-unknown-question')
+def test_unknown_question(request: Request):
+    """Test if the agent uses add_question_to_database for unknown questions"""
+    try:
+        session_id = str(uuid.uuid4())
+        agent = session(session_id)
+        
+        # Test with a question the agent shouldn't know
+        test_prompt = "What was my exact salary at my first job in 2010?"
+        logger.info(f"Testing agent with unknown question: {test_prompt}")
+        
+        # Use a simple call instead of streaming for testing
+        response = agent(test_prompt)
+        logger.info(f"Agent response to unknown question: {response}")
+        
+        return Response(
+            content=json.dumps({
+                "message": "Unknown question test completed",
+                "prompt": test_prompt,
+                "response": str(response)
+            }),
+            media_type="application/json",
+        )
+    except Exception as e:
+        logger.error(f"Unknown question test failed: {e}")
+        return Response(
+            content=json.dumps({"error": f"Unknown question test failed: {str(e)}"}),
             media_type="application/json",
             status_code=500
         )

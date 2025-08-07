@@ -358,6 +358,7 @@
                                     scrollToBottom();
                                 } else {
                                     // This is regular text, append it to the message
+                                    // Don't add extra spaces, just append the raw data
                                     assistantMessage += data;
                                     
                                     if (!messageElement) {
