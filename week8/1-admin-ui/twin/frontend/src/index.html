@@ -332,10 +332,21 @@
                 let messageElement = null;
 
                 hideTypingIndicator();
+                
+                // Re-enable input immediately when streaming starts
+                messageInput.disabled = false;
+                sendButton.disabled = false;
 
-                while (true) {
-                    const { done, value } = await reader.read();
-                    if (done) break;
+                // Add timeout to prevent indefinite blocking
+                const timeout = setTimeout(() => {
+                    console.log('Streaming timeout - forcing completion');
+                    reader.cancel();
+                }, 30000); // 30 second timeout
+                
+                try {
+                    while (true) {
+                        const { done, value } = await reader.read();
+                        if (done) break;
 
                     const chunk = decoder.decode(value, { stream: true });
                     const lines = chunk.split('\n');
@@ -375,6 +386,9 @@
                         }
                     }
                 }
+                } finally {
+                    clearTimeout(timeout); // Clear the timeout
+                }
                 console.log('Streaming response complete'); // Debug
             } catch (error) {
                 console.error('Error sending message:', error);
@@ -386,6 +400,16 @@
                 messageInput.disabled = false;
                 sendButton.disabled = false;
                 messageInput.focus();
+                
+                // Backup: ensure input is enabled after a short delay
+                setTimeout(() => {
+                    if (messageInput.disabled) {
+                        console.log('Backup: forcing input re-enable');
+                        messageInput.disabled = false;
+                        sendButton.disabled = false;
+                        messageInput.focus();
+                    }
+                }, 1000);
             }
         }
 

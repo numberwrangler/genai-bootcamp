@@ -138,11 +138,24 @@ async def chat(chat_request: ChatRequest, request: Request):
         global current_agent
         current_agent = agent  # Store the current agent for use in tools
         
-        logger.info("Created agent successfully, starting streaming response")
-        response = StreamingResponse(
-            generate(agent, session_id, chat_request.prompt.strip(), request),
-            media_type="text/event-stream"
-        )
+        # Check if user wants non-streaming mode
+        use_streaming = request.query_params.get("stream", "true").lower() == "true"
+        
+        if use_streaming:
+            logger.info("Created agent successfully, starting streaming response")
+            response = StreamingResponse(
+                generate(agent, session_id, chat_request.prompt.strip(), request),
+                media_type="text/event-stream"
+            )
+        else:
+            logger.info("Created agent successfully, using non-streaming response")
+            # Use non-streaming approach
+            result = agent(chat_request.prompt.strip())
+            response = Response(
+                content=json.dumps({"response": str(result)}),
+                media_type="application/json"
+            )
+        
         response.set_cookie(key="session_id", value=session_id)
         return response
         
@@ -227,16 +240,20 @@ async def generate(agent: Agent, session_id: str, prompt: str, request: Request)
                     logger.info(f"Received data: '{data}'")
                     
                     if data:
-                        # Buffer characters and send complete words
+                        # Try a different approach: accumulate more text before sending
                         char_buffer += data
                         
-                        # Check if we have a complete word (ends with space or punctuation)
-                        if data in [' ', '.', ',', '!', '?', ';', ':', '\n']:
-                            # Send the complete word/phrase
+                        # Send when we have a complete sentence or phrase
+                        if data in ['.', '!', '?', '\n']:
+                            # Send the complete sentence
                             yield f"data: {char_buffer}\n\n"
                             char_buffer = ""
-                        # Or if buffer is getting long, send it anyway
-                        elif len(char_buffer) >= 20:
+                        # Or send when we have a substantial amount of text
+                        elif len(char_buffer) >= 50:
+                            yield f"data: {char_buffer}\n\n"
+                            char_buffer = ""
+                        # Or send when we have a complete word followed by space
+                        elif data == ' ' and len(char_buffer) >= 10:
                             yield f"data: {char_buffer}\n\n"
                             char_buffer = ""
                 else:
@@ -442,6 +459,39 @@ def test_question_database(request: Request):
         logger.error(f"Question database test failed: {e}")
         return Response(
             content=json.dumps({"error": f"Question database test failed: {str(e)}"}),
+            media_type="application/json",
+            status_code=500
+        )
+
+@app.post('/api/chat-simple')
+async def chat_simple(chat_request: ChatRequest, request: Request):
+    """Non-streaming chat endpoint for testing"""
+    try:
+        logger.info(f"Received simple chat request: {chat_request.prompt[:100]}...")
+        
+        session_id: str = request.cookies.get("session_id", str(uuid.uuid4()))
+        agent = session(session_id)
+        
+        # Use non-streaming approach
+        start_time = time.time()
+        result = agent(chat_request.prompt.strip())
+        end_time = time.time()
+        
+        response_time = end_time - start_time
+        logger.info(f"Simple chat response time: {response_time:.2f} seconds")
+        
+        return Response(
+            content=json.dumps({
+                "response": str(result),
+                "response_time": round(response_time, 2)
+            }),
+            media_type="application/json"
+        )
+        
+    except Exception as e:
+        logger.error(f"Error in simple chat endpoint: {e}")
+        return Response(
+            content=json.dumps({"error": f"Internal server error: {str(e)}"}),
             media_type="application/json",
             status_code=500
         )
