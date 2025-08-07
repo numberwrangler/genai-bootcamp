@@ -16,8 +16,16 @@ import asyncio
 import time
 from questions import Question, QuestionManager
 
-# Re-use boto session across invocations
+# Re-use boto session across invocations with performance optimizations
 boto_session = boto3.Session()
+# Configure boto3 for better performance
+boto3_config = boto3.Config(
+    retries=dict(max_attempts=2),  # Reduce retry attempts
+    connect_timeout=5,  # 5 second connection timeout
+    read_timeout=30,    # 30 second read timeout
+    max_pool_connections=10  # Connection pooling
+)
+
 state_bucket_name = os.environ.get("STATE_BUCKET", "")
 if state_bucket_name == "":
     logger.error("STATE_BUCKET environment variable is not set")
@@ -44,7 +52,7 @@ bedrock_model = BedrockModel(
 )
 current_agent: Agent | None = None
 conversation_manager = SlidingWindowConversationManager(
-    window_size=3,  # Further reduced to improve performance
+    window_size=2,  # Minimal window for maximum performance
     should_truncate_results=True, # Enable truncating the tool result when a message is too large for the model's context window 
 )
 SYSTEM_PROMPT = """
@@ -201,7 +209,7 @@ async def generate(agent: Agent, session_id: str, prompt: str, request: Request)
         logger.info(f"Processing chat with {len(agent.messages)} messages in history")
         
         # If we still have too many messages, start fresh
-        if len(agent.messages) > 6:
+        if len(agent.messages) > 4:
             logger.warning("Too many messages in history, starting fresh conversation")
             agent.messages = []
         
@@ -544,40 +552,75 @@ async def health_check():
 
 @app.get("/api/performance-test")
 async def performance_test():
-    """Test response time"""
+    """Test response time with detailed breakdown"""
+    results = {}
+    
+    # Test 1: Basic agent creation
     start_time = time.time()
     try:
         session_id = str(uuid.uuid4())
         agent = session(session_id)
-        
-        # Simple test prompt
-        test_prompt = "Hello"
-        response = agent(test_prompt)
-        
-        end_time = time.time()
-        response_time = end_time - start_time
-        
-        return Response(
-            content=json.dumps({
-                "status": "success",
-                "response_time_seconds": round(response_time, 2),
-                "response_length": len(str(response))
-            }),
-            media_type="application/json",
-        )
+        agent_creation_time = time.time() - start_time
+        results["agent_creation_seconds"] = round(agent_creation_time, 2)
     except Exception as e:
-        end_time = time.time()
-        response_time = end_time - start_time
-        logger.error(f"Performance test failed: {e}")
+        results["agent_creation_error"] = str(e)
         return Response(
-            content=json.dumps({
-                "status": "error",
-                "error": str(e),
-                "response_time_seconds": round(response_time, 2)
-            }),
+            content=json.dumps({"status": "error", "error": f"Agent creation failed: {e}"}),
             media_type="application/json",
             status_code=500
         )
+    
+    # Test 2: Simple response without tools
+    start_time = time.time()
+    try:
+        test_prompt = "Hello"
+        response = agent(test_prompt)
+        simple_response_time = time.time() - start_time
+        results["simple_response_seconds"] = round(simple_response_time, 2)
+        results["response_length"] = len(str(response))
+    except Exception as e:
+        results["simple_response_error"] = str(e)
+    
+    # Test 3: AWS connectivity test
+    start_time = time.time()
+    try:
+        # Test S3 connectivity
+        s3_client = boto_session.client('s3', config=boto3_config)
+        s3_client.head_bucket(Bucket=state_bucket_name)
+        s3_time = time.time() - start_time
+        results["s3_connectivity_seconds"] = round(s3_time, 2)
+    except Exception as e:
+        results["s3_connectivity_error"] = str(e)
+    
+    # Test 4: DynamoDB connectivity test
+    start_time = time.time()
+    try:
+        # Test DynamoDB connectivity
+        dynamodb = boto_session.resource('dynamodb', config=boto3_config)
+        table = dynamodb.Table(ddb_table)
+        table.table_status
+        ddb_time = time.time() - start_time
+        results["dynamodb_connectivity_seconds"] = round(ddb_time, 2)
+    except Exception as e:
+        results["dynamodb_connectivity_error"] = str(e)
+    
+    # Test 5: Question manager test
+    start_time = time.time()
+    try:
+        test_question = question_manager.add_question("Performance test question")
+        qm_time = time.time() - start_time
+        results["question_manager_seconds"] = round(qm_time, 2)
+    except Exception as e:
+        results["question_manager_error"] = str(e)
+    
+    total_time = sum([v for v in results.values() if isinstance(v, (int, float))])
+    results["total_time_seconds"] = round(total_time, 2)
+    results["status"] = "success"
+    
+    return Response(
+        content=json.dumps(results),
+        media_type="application/json",
+    )
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=int(os.environ.get("PORT", "8080")))
