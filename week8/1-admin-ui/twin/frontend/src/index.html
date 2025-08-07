@@ -329,7 +329,6 @@
                 const decoder = new TextDecoder();
                 let assistantMessage = '';
                 let messageElement = null;
-                let textBuffer = '';
 
                 hideTypingIndicator();
 
@@ -358,22 +357,9 @@
                                     bubble.textContent = data;
                                     scrollToBottom();
                                 } else {
-                                    // This is regular text, buffer it and send complete words
+                                    // This is regular text, append it directly (backend handles buffering)
                                     console.log('Received text chunk:', JSON.stringify(data)); // Debug
-                                    textBuffer += data;
-                                    
-                                    // Send complete words (ends with space or punctuation)
-                                    if (data.endsWith(' ') || data.endsWith('.') || data.endsWith(',') || 
-                                        data.endsWith('!') || data.endsWith('?') || data.endsWith(';') || 
-                                        data.endsWith(':') || data.endsWith('\n')) {
-                                        assistantMessage += textBuffer;
-                                        textBuffer = '';
-                                    }
-                                    // Or if buffer is getting long, send it anyway
-                                    else if (textBuffer.length >= 10) {
-                                        assistantMessage += textBuffer;
-                                        textBuffer = '';
-                                    }
+                                    assistantMessage += data;
                                     
                                     if (!messageElement) {
                                         messageElement = createMessageElement('assistant', '');
@@ -381,22 +367,11 @@
                                     }
                                     
                                     const bubble = messageElement.querySelector('.message-bubble');
-                                    bubble.textContent = assistantMessage + textBuffer;
+                                    bubble.textContent = assistantMessage;
                                     scrollToBottom();
                                 }
                             }
                         }
-                    }
-                }
-                
-                // Flush any remaining buffered text
-                if (textBuffer) {
-                    assistantMessage += textBuffer;
-                    textBuffer = '';
-                    if (messageElement) {
-                        const bubble = messageElement.querySelector('.message-bubble');
-                        bubble.textContent = assistantMessage;
-                        scrollToBottom();
                     }
                 }
             } catch (error) {
