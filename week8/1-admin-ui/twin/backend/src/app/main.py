@@ -66,8 +66,8 @@ def type_out_text(answer: str) -> str:
     
     
 def session(id: str) -> Agent:
-    # Re-enable tools now that we know the agent works
-    tools = [retrieve, add_question_to_database, type_out_text]
+    # Start with just the essential tools to avoid tool_use issues
+    tools = [retrieve, add_question_to_database]
     logger.info(f"Available tools: {[tool.__name__ if hasattr(tool, '__name__') else str(tool) for tool in tools]}")
     
     session_manager = S3SessionManager(
@@ -109,62 +109,30 @@ async def chat(chat_request: ChatRequest, request: Request):
 
 async def generate(agent: Agent, session_id: str, prompt: str, request: Request):
     try:
-        # Clean up any empty messages and orphaned tool_use blocks
+        # Check for any tool_use blocks in the conversation history
+        has_tool_use = any(
+            any(content.get("type") == "tool_use" for content in msg.get("content", []))
+            for msg in agent.messages
+        )
+        
+        if has_tool_use:
+            logger.warning("Found tool_use blocks in conversation history, clearing to prevent validation errors")
+            agent.messages = []
+        
+        # Clean up any empty messages
         original_count = len(agent.messages)
+        agent.messages = [msg for msg in agent.messages if 
+                         msg.get("content") and 
+                         len(msg["content"]) > 0]
         
-        # More robust cleanup to handle orphaned tool_use blocks
-        cleaned_messages = []
-        i = 0
-        while i < len(agent.messages):
-            msg = agent.messages[i]
-            
-            # Skip empty messages
-            if not msg.get("content") or len(msg["content"]) == 0:
-                i += 1
-                continue
-            
-            # Check if this message has tool_use blocks
-            has_tool_use = any(
-                content.get("type") == "tool_use" 
-                for content in msg.get("content", [])
-            )
-            
-            if has_tool_use:
-                # Check if the next message has corresponding tool_result
-                if i + 1 < len(agent.messages):
-                    next_msg = agent.messages[i + 1]
-                    has_tool_result = any(
-                        content.get("type") == "tool_result" 
-                        for content in next_msg.get("content", [])
-                    )
-                    
-                    if has_tool_result:
-                        # Both tool_use and tool_result are present, keep both
-                        cleaned_messages.append(msg)
-                        cleaned_messages.append(next_msg)
-                        i += 2  # Skip the next message since we already added it
-                    else:
-                        # Orphaned tool_use, skip this message
-                        logger.warning(f"Skipping orphaned tool_use message at index {i}")
-                        i += 1
-                else:
-                    # tool_use at the end without tool_result, skip it
-                    logger.warning(f"Skipping orphaned tool_use message at end of conversation")
-                    i += 1
-            else:
-                # Regular message, keep it
-                cleaned_messages.append(msg)
-                i += 1
-        
-        agent.messages = cleaned_messages
         cleaned_count = len(agent.messages)
         if original_count != cleaned_count:
-            logger.info(f"Cleaned {original_count - cleaned_count} problematic messages from conversation history")
+            logger.info(f"Cleaned {original_count - cleaned_count} empty messages from conversation history")
         
         # Log message count for debugging
         logger.info(f"Processing chat with {len(agent.messages)} messages in history")
         
-        # If we still have too many messages or suspect issues, start fresh
+        # If we still have too many messages, start fresh
         if len(agent.messages) > 10:
             logger.warning("Too many messages in history, starting fresh conversation")
             agent.messages = []
@@ -225,8 +193,12 @@ async def generate(agent: Agent, session_id: str, prompt: str, request: Request)
             
             # Check if this is the specific tool_use validation error
             if "tool_use" in str(e) and "tool_result" in str(e):
-                logger.error("Detected orphaned tool_use blocks, clearing conversation history")
+                logger.error("Detected orphaned tool_use blocks, clearing conversation history and session")
+                # Clear the conversation history
                 agent.messages = []
+                # Force a new session to be created
+                global current_agent
+                current_agent = None
                 yield f"data: [Error: Conversation corrupted. Please try your question again.]\n\n"
                 return
             
@@ -276,6 +248,10 @@ def clear_chat(request: Request):
     session_id = request.cookies.get("session_id", str(uuid.uuid4()))
     agent = session(session_id)
     agent.messages = []
+    
+    # Also clear the global agent to force a fresh session
+    global current_agent
+    current_agent = None
     
     response = Response(
         content=json.dumps({"message": "Conversation history cleared"}),
