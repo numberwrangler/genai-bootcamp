@@ -13,6 +13,7 @@ import os
 import uuid
 import uvicorn
 import asyncio
+import time
 from questions import Question, QuestionManager
 
 # Re-use boto session across invocations
@@ -65,15 +66,18 @@ def type_out_text(answer: str) -> str:
     return answer
     
     
-def session(id: str) -> Agent:
+def session(id: str, force_new: bool = False) -> Agent:
     # Start with just the essential tools to avoid tool_use issues
     tools = [retrieve, add_question_to_database]
     logger.info(f"Available tools: {[tool.__name__ if hasattr(tool, '__name__') else str(tool) for tool in tools]}")
     
+    # If forcing new session, add timestamp to make it unique
+    session_id_to_use = f"{id}_{int(time.time())}" if force_new else id
+    
     session_manager = S3SessionManager(
         boto_session=boto_session,
         bucket=state_bucket_name,
-        session_id=id,
+        session_id=session_id_to_use,
     )
     return Agent(
         conversation_manager=conversation_manager,
@@ -134,6 +138,13 @@ async def generate(agent: Agent, session_id: str, prompt: str, request: Request)
         if has_tool_use:
             logger.warning("Found tool_use blocks in conversation history, clearing to prevent validation errors")
             agent.messages = []
+            # Also try to clear the S3 session
+            try:
+                if hasattr(agent, 'session_manager') and agent.session_manager:
+                    agent.session_manager.clear_session()
+                    logger.info("Cleared S3 session data due to tool_use blocks")
+            except Exception as s3_error:
+                logger.error(f"Error clearing S3 session: {s3_error}")
         
         # Clean up any empty messages
         original_count = len(agent.messages)
@@ -209,13 +220,18 @@ async def generate(agent: Agent, session_id: str, prompt: str, request: Request)
             
             # Check if this is the specific tool_use validation error
             if "tool_use" in str(e) and "tool_result" in str(e):
-                logger.error("Detected orphaned tool_use blocks, clearing conversation history and session")
-                # Clear the conversation history
-                agent.messages = []
-                # Force a new session to be created
-                global current_agent
-                current_agent = None
-                yield f"data: [Error: Conversation corrupted. Please try your question again.]\n\n"
+                logger.error("Detected orphaned tool_use blocks, creating fresh session")
+                try:
+                    # Create a completely new session with a unique ID
+                    new_session_id = f"{session_id}_fresh_{int(time.time())}"
+                    agent = session(new_session_id, force_new=True)
+                    global current_agent
+                    current_agent = agent
+                    logger.info(f"Created fresh session: {new_session_id}")
+                except Exception as cleanup_error:
+                    logger.error(f"Error creating fresh session: {cleanup_error}")
+                
+                yield f"data: [Error: Conversation corrupted. Starting fresh session. Please try your question again.]\n\n"
                 return
             
             # Try fallback to non-streaming approach
