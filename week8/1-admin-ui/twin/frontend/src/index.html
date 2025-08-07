@@ -359,6 +359,7 @@
                                 } else {
                                     // This is regular text, append it to the message
                                     // Don't add extra spaces, just append the raw data
+                                    console.log('Received text chunk:', JSON.stringify(data)); // Debug
                                     assistantMessage += data;
                                     
                                     if (!messageElement) {
