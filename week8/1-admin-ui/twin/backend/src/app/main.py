@@ -192,7 +192,6 @@ async def generate(agent: Agent, session_id: str, prompt: str, request: Request)
             agent.messages = []
         
         full_response = ""
-        text_buffer = ""
         event_count = 0
         timeout_count = 0
         max_timeout = 30  # 30 seconds timeout
@@ -205,10 +204,6 @@ async def generate(agent: Agent, session_id: str, prompt: str, request: Request)
                 
                 if "complete" in event:
                     logger.info("Response generation complete")
-                    # Flush any remaining buffered text
-                    if text_buffer:
-                        yield f"data: {text_buffer}\n\n"
-                        text_buffer = ""
                     break
                 elif "tool_use" in event:
                     # Handle tool calls - show that a tool is being used
@@ -226,17 +221,8 @@ async def generate(agent: Agent, session_id: str, prompt: str, request: Request)
                     logger.info(f"Received data: '{data}'")
                     
                     if data:
-                        # Buffer the text and send complete words/phrases
-                        text_buffer += data
-                        
-                        # Send immediately if it's a complete word (ends with space or punctuation)
-                        if data.endswith((' ', '.', ',', '!', '?', ';', ':', '\n')):
-                            yield f"data: {text_buffer}\n\n"
-                            text_buffer = ""
-                        # Or if buffer is getting too long, send it anyway
-                        elif len(text_buffer) >= 10:
-                            yield f"data: {text_buffer}\n\n"
-                            text_buffer = ""
+                        # Send the data exactly as received, no buffering
+                        yield f"data: {data}\n\n"
                 else:
                     logger.warning(f"Unknown event type: {event}")
                 
