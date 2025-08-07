@@ -16,7 +16,7 @@ _ = Twin(app, "Twin",
          kb_input_bucket=kb.input_bucket,
          env=env,
          custom_domain_name="twin.numberwrangler.net",  # Replace with your domain
-         custom_certificate_arn="arn:aws:acm:us-east-1:845422352941:certificate/cc28962c-4c16-46ee-ae43-f36c5c8b6a51"  # Replace with your certificate ARN
+         custom_certificate_arn="arn:aws:acm:us-east-1:845422352941:certificate/aea155a7-985d-40d9-9ed6-a62f21c573b5"  # Replace with your certificate ARN
 )
 
   
