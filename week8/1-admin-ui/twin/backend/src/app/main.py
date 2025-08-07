@@ -20,7 +20,16 @@ from questions import Question, QuestionManager
 boto_session = boto3.Session()
 state_bucket_name = os.environ.get("STATE_BUCKET", "")
 if state_bucket_name == "":
-    raise ValueError("BUCKET_NAME environment variable is not set.")
+    logger.error("STATE_BUCKET environment variable is not set")
+    raise ValueError("STATE_BUCKET environment variable is not set.")
+
+# Check for other required environment variables
+ddb_table = os.environ.get("DDB_TABLE", "")
+if ddb_table == "":
+    logger.error("DDB_TABLE environment variable is not set")
+    raise ValueError("DDB_TABLE environment variable is not set.")
+
+logger.info(f"Environment variables - STATE_BUCKET: {state_bucket_name}, DDB_TABLE: {ddb_table}")
 logging.getLogger("strands").setLevel(logging.DEBUG)
 logging.basicConfig(
     format="%(levelname)s | %(name)s | %(message)s", 
@@ -384,7 +393,16 @@ def test_question_database(request: Request):
 @app.get("/")
 async def root():
     return Response(
-        content=json.dumps({"message": "OK", "status": "healthy"}),
+        content=json.dumps({
+            "message": "OK", 
+            "status": "healthy",
+            "timestamp": time.time(),
+            "environment": {
+                "state_bucket": state_bucket_name,
+                "ddb_table": os.environ.get("DDB_TABLE", "not_set"),
+                "model_id": model_id
+            }
+        }),
         media_type="application/json",
     )
 
