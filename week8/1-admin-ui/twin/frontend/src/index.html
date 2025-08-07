@@ -325,6 +325,7 @@
                 }
 
                 // Handle streaming response
+                console.log('Starting streaming response'); // Debug
                 const reader = response.body.getReader();
                 const decoder = new TextDecoder();
                 let assistantMessage = '';
@@ -374,12 +375,14 @@
                         }
                     }
                 }
+                console.log('Streaming response complete'); // Debug
             } catch (error) {
                 console.error('Error sending message:', error);
                 hideTypingIndicator();
                 showError('Failed to send message. Please try again.');
             } finally {
                 // Re-enable input
+                console.log('Re-enabling input controls'); // Debug
                 messageInput.disabled = false;
                 sendButton.disabled = false;
                 messageInput.focus();

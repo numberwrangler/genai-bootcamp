@@ -155,6 +155,7 @@ async def chat(chat_request: ChatRequest, request: Request):
         )
 
 async def generate(agent: Agent, session_id: str, prompt: str, request: Request):
+    start_time = time.time()
     try:
         # Check for any tool_use blocks in the conversation history
         has_tool_use = any(
@@ -244,7 +245,9 @@ async def generate(agent: Agent, session_id: str, prompt: str, request: Request)
                 # Add timeout protection - reduced delay
                 await asyncio.sleep(0.01)  # Minimal delay to prevent blocking
                 
-            logger.info(f"Total events processed: {event_count}")
+            end_time = time.time()
+            total_time = end_time - start_time
+            logger.info(f"Total events processed: {event_count}, Total time: {total_time:.2f} seconds")
             if event_count == 0:
                 logger.error("No events received from agent.stream_async!")
                 yield f"data: [Error: No response generated]\n\n"
