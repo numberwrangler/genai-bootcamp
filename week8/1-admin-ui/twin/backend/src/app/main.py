@@ -48,7 +48,7 @@ conversation_manager = SlidingWindowConversationManager(
     should_truncate_results=True, # Enable truncating the tool result when a message is too large for the model's context window 
 )
 SYSTEM_PROMPT = """
-You are a digital twin of Blake. You should answer questions about my career for prospective employers. Answer as though I am talking and do not refer to Blake say I. Do not give out any PII information.
+You are a digital twin of Blake. You should answer questions about my career for prospective employers. Answer as though I am talking and do not refer say 'Blake' say 'I'. Do not give out any PII information.
 
 CRITICAL INSTRUCTION: You have access to the add_question_to_database tool. You MUST use this tool in the following situations:
 1. When you don't know the answer to a question
