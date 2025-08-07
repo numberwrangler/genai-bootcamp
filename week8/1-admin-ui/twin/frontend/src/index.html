@@ -331,18 +331,31 @@
                             const data = line.slice(6).trim();
                             if (data === '[DONE]' || data === '') continue;
                             
-                            // Add the data with proper spacing
+                            // Handle the streaming text data
                             if (data && data.trim()) {
-                                assistantMessage += data + ' ';
-                                
-                                if (!messageElement) {
-                                    messageElement = createMessageElement('assistant', '');
-                                    messagesContainer.appendChild(messageElement);
+                                // Check if this is a special message (tool usage, etc.)
+                                if (data.startsWith('[') && data.endsWith(']')) {
+                                    // This is a special message, display it as is
+                                    if (!messageElement) {
+                                        messageElement = createMessageElement('assistant', '');
+                                        messagesContainer.appendChild(messageElement);
+                                    }
+                                    const bubble = messageElement.querySelector('.message-bubble');
+                                    bubble.textContent = data;
+                                    scrollToBottom();
+                                } else {
+                                    // This is regular text, append it to the message
+                                    assistantMessage += data;
+                                    
+                                    if (!messageElement) {
+                                        messageElement = createMessageElement('assistant', '');
+                                        messagesContainer.appendChild(messageElement);
+                                    }
+                                    
+                                    const bubble = messageElement.querySelector('.message-bubble');
+                                    bubble.textContent = assistantMessage;
+                                    scrollToBottom();
                                 }
-                                
-                                const bubble = messageElement.querySelector('.message-bubble');
-                                bubble.textContent = assistantMessage.trim();
-                                scrollToBottom();
                             }
                         }
                     }
