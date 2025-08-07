@@ -112,16 +112,51 @@ async def generate(agent: Agent, session_id: str, prompt: str, request: Request)
         # Clean up any empty messages and orphaned tool_use blocks
         original_count = len(agent.messages)
         
-        # Remove empty messages
-        agent.messages = [msg for msg in agent.messages if 
-                         msg.get("content") and 
-                         len(msg["content"]) > 0 and 
-                         msg["content"][0].get("text", "").strip()]
+        # More robust cleanup to handle orphaned tool_use blocks
+        cleaned_messages = []
+        i = 0
+        while i < len(agent.messages):
+            msg = agent.messages[i]
+            
+            # Skip empty messages
+            if not msg.get("content") or len(msg["content"]) == 0:
+                i += 1
+                continue
+            
+            # Check if this message has tool_use blocks
+            has_tool_use = any(
+                content.get("type") == "tool_use" 
+                for content in msg.get("content", [])
+            )
+            
+            if has_tool_use:
+                # Check if the next message has corresponding tool_result
+                if i + 1 < len(agent.messages):
+                    next_msg = agent.messages[i + 1]
+                    has_tool_result = any(
+                        content.get("type") == "tool_result" 
+                        for content in next_msg.get("content", [])
+                    )
+                    
+                    if has_tool_result:
+                        # Both tool_use and tool_result are present, keep both
+                        cleaned_messages.append(msg)
+                        cleaned_messages.append(next_msg)
+                        i += 2  # Skip the next message since we already added it
+                    else:
+                        # Orphaned tool_use, skip this message
+                        logger.warning(f"Skipping orphaned tool_use message at index {i}")
+                        i += 1
+                else:
+                    # tool_use at the end without tool_result, skip it
+                    logger.warning(f"Skipping orphaned tool_use message at end of conversation")
+                    i += 1
+            else:
+                # Regular message, keep it
+                cleaned_messages.append(msg)
+                i += 1
         
-        # Simple cleanup - just remove empty messages, don't touch tool calls
-        agent.messages = [msg for msg in agent.messages if 
-                         msg.get("content") and 
-                         len(msg["content"]) > 0]
+        agent.messages = cleaned_messages
         cleaned_count = len(agent.messages)
         if original_count != cleaned_count:
             logger.info(f"Cleaned {original_count - cleaned_count} problematic messages from conversation history")
@@ -187,6 +222,14 @@ async def generate(agent: Agent, session_id: str, prompt: str, request: Request)
             yield f"data: [Error: Response timeout]\n\n"
         except Exception as e:
             logger.error(f"Streaming error: {e}")
+            
+            # Check if this is the specific tool_use validation error
+            if "tool_use" in str(e) and "tool_result" in str(e):
+                logger.error("Detected orphaned tool_use blocks, clearing conversation history")
+                agent.messages = []
+                yield f"data: [Error: Conversation corrupted. Please try your question again.]\n\n"
+                return
+            
             # Try fallback to non-streaming approach
             try:
                 logger.info("Attempting fallback to non-streaming response")
