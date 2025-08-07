@@ -41,7 +41,9 @@ conversation_manager = SlidingWindowConversationManager(
 SYSTEM_PROMPT = """
 You are a digital twin of Blake. You should answer questions about my career for prospective employers. Answer as though I am talking. Do not give out any PII information.
 
-When searching for information via a tool, use the tool to retrieve it, or if you don't know the answer, use the add_question_to_database tool.
+IMPORTANT: When you don't know the answer to a question or need more information, you MUST use the add_question_to_database tool to store the question for later processing. This ensures that unknown questions are captured and can be answered later.
+
+When searching for information via a tool, use the retrieve tool to find relevant information. If the retrieve tool doesn't provide the answer you need, use the add_question_to_database tool to store the question.
 
 Always provide your responses naturally with proper spacing and formatting. Use complete sentences and paragraphs. Do not display tool calls as text - use the actual tools.
 """
@@ -51,10 +53,12 @@ question_manager = QuestionManager()
 @tool
 def add_question_to_database(question: str) -> str:
     """
-    Adds a new unanswered question to DynamoDB for later processing.
+    Stores a question in the database when you don't know the answer or need more information.
+    Use this tool whenever you cannot provide a complete or accurate answer to a user's question.
+    The question will be stored for later processing and answering.
     """
     new_question = question_manager.add_question(question=question)
-    return f"Question stored with ID: {new_question.question_id}. Awaiting answer."
+    return f"Question stored with ID: {new_question.question_id}. This question has been saved for later processing and will be answered when more information becomes available."
 
 @tool
 def type_out_text(answer: str) -> str:
@@ -346,6 +350,31 @@ def test_agent(request: Request):
         logger.error(f"Agent test failed: {e}")
         return Response(
             content=json.dumps({"error": f"Agent test failed: {str(e)}"}),
+            media_type="application/json",
+            status_code=500
+        )
+
+@app.get('/api/test-question-db')
+def test_question_database(request: Request):
+    """Test the question database functionality specifically"""
+    try:
+        # Test adding a question directly
+        test_question = question_manager.add_question("Test question for database verification")
+        logger.info(f"Question added successfully: {test_question.question_id}")
+        
+        return Response(
+            content=json.dumps({
+                "message": "Question database test successful",
+                "question_id": test_question.question_id,
+                "question": test_question.question,
+                "processed": test_question.processed
+            }),
+            media_type="application/json",
+        )
+    except Exception as e:
+        logger.error(f"Question database test failed: {e}")
+        return Response(
+            content=json.dumps({"error": f"Question database test failed: {str(e)}"}),
             media_type="application/json",
             status_code=500
         )
