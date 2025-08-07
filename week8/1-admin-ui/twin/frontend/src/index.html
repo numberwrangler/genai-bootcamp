@@ -88,6 +88,16 @@
             51%, 100% { opacity: 0; }
         }
 
+        .error-message {
+            background: #ffebee;
+            color: #c62828;
+            padding: 12px 16px;
+            border-radius: 8px;
+            margin: 10px 0;
+            border-left: 4px solid #c62828;
+            font-size: 14px;
+        }
+
         .message-bubble {
             max-width: 70%;
             padding: 12px 16px;
@@ -309,7 +319,10 @@
                     body: JSON.stringify({ prompt: message })
                 });
 
-                if (!response.ok) throw new Error('Failed to send message');
+                if (!response.ok) {
+                    const errorData = await response.json().catch(() => ({}));
+                    throw new Error(errorData.error || `HTTP ${response.status}: ${response.statusText}`);
+                }
 
                 // Handle streaming response
                 const reader = response.body.getReader();

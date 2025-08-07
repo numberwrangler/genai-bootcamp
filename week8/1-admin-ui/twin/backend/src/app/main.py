@@ -88,24 +88,40 @@ class ChatRequest(BaseModel):
 
 @app.post('/api/chat')
 async def chat(chat_request: ChatRequest, request: Request):
-    # Validate that the prompt is not empty
-    if not chat_request.prompt or not chat_request.prompt.strip():
-        return Response(
-            content=json.dumps({"error": "Prompt cannot be empty"}),
-            media_type="application/json",
-            status_code=400
+    try:
+        logger.info(f"Received chat request: {chat_request.prompt[:100]}...")
+        
+        # Validate that the prompt is not empty
+        if not chat_request.prompt or not chat_request.prompt.strip():
+            logger.warning("Empty prompt received")
+            return Response(
+                content=json.dumps({"error": "Prompt cannot be empty"}),
+                media_type="application/json",
+                status_code=400
+            )
+        
+        session_id: str = request.cookies.get("session_id", str(uuid.uuid4()))
+        logger.info(f"Using session ID: {session_id}")
+        
+        agent = session(session_id)
+        global current_agent
+        current_agent = agent  # Store the current agent for use in tools
+        
+        logger.info("Created agent successfully, starting streaming response")
+        response = StreamingResponse(
+            generate(agent, session_id, chat_request.prompt.strip(), request),
+            media_type="text/event-stream"
         )
-    
-    session_id: str = request.cookies.get("session_id", str(uuid.uuid4()))
-    agent = session(session_id)
-    global current_agent
-    current_agent = agent  # Store the current agent for use in tools
-    response = StreamingResponse(
-        generate(agent, session_id, chat_request.prompt.strip(), request),
-        media_type="text/event-stream"
-    )
-    response.set_cookie(key="session_id", value=session_id)
-    return response
+        response.set_cookie(key="session_id", value=session_id)
+        return response
+        
+    except Exception as e:
+        logger.error(f"Error in chat endpoint: {e}")
+        return Response(
+            content=json.dumps({"error": f"Internal server error: {str(e)}"}),
+            media_type="application/json",
+            status_code=500
+        )
 
 async def generate(agent: Agent, session_id: str, prompt: str, request: Request):
     try:
@@ -323,9 +339,35 @@ def test_agent(request: Request):
 @app.get("/")
 async def root():
     return Response(
-        content=json.dumps({"message": "OK"}),
+        content=json.dumps({"message": "OK", "status": "healthy"}),
         media_type="application/json",
     )
+
+@app.get("/health")
+async def health_check():
+    """Health check endpoint"""
+    try:
+        # Test basic functionality
+        test_agent = session("health-check")
+        return Response(
+            content=json.dumps({
+                "status": "healthy",
+                "message": "Backend is running",
+                "model_id": model_id,
+                "bucket": state_bucket_name
+            }),
+            media_type="application/json",
+        )
+    except Exception as e:
+        logger.error(f"Health check failed: {e}")
+        return Response(
+            content=json.dumps({
+                "status": "unhealthy",
+                "error": str(e)
+            }),
+            media_type="application/json",
+            status_code=500
+        )
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=int(os.environ.get("PORT", "8080")))
