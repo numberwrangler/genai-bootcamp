@@ -341,11 +341,11 @@
 
                     for (const line of lines) {
                         if (line.startsWith('data: ')) {
-                            const data = line.slice(6).trim();
+                            const data = line.slice(6);
                             if (data === '[DONE]' || data === '') continue;
                             
                             // Handle the streaming text data
-                            if (data && data.trim()) {
+                            if (data && data.length > 0) {
                                 // Check if this is a special message (tool usage, etc.)
                                 if (data.startsWith('[') && data.endsWith(']')) {
                                     // This is a special message, display it as is

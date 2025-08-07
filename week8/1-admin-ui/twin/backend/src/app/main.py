@@ -190,6 +190,7 @@ async def generate(agent: Agent, session_id: str, prompt: str, request: Request)
             agent.messages = []
         
         full_response = ""
+        text_buffer = ""  # Buffer for accumulating text
         event_count = 0
         timeout_count = 0
         max_timeout = 30  # 30 seconds timeout
@@ -215,6 +216,7 @@ async def generate(agent: Agent, session_id: str, prompt: str, request: Request)
                     yield f"data: [Tool result: {tool_result}]\n\n"
                 elif "data" in event:
                     full_response += event['data']
+                    text_buffer += event['data']
                     logger.info(f"Received data: '{event['data']}'")
                     
                     # Get the raw data without excessive processing
