@@ -12,32 +12,13 @@ import logging
 import os
 import uuid
 import uvicorn
-import asyncio
-import time
 from questions import Question, QuestionManager
 
-# Re-use boto session across invocations with performance optimizations
+# Re-use boto session across invocations
 boto_session = boto3.Session()
-# Configure boto3 for better performance
-boto3_config = boto3.Config(
-    retries=dict(max_attempts=2),  # Reduce retry attempts
-    connect_timeout=5,  # 5 second connection timeout
-    read_timeout=30,    # 30 second read timeout
-    max_pool_connections=10  # Connection pooling
-)
-
 state_bucket_name = os.environ.get("STATE_BUCKET", "")
 if state_bucket_name == "":
-    logger.error("STATE_BUCKET environment variable is not set")
-    raise ValueError("STATE_BUCKET environment variable is not set.")
-
-# Check for other required environment variables
-ddb_table = os.environ.get("DDB_TABLE", "")
-if ddb_table == "":
-    logger.error("DDB_TABLE environment variable is not set")
-    raise ValueError("DDB_TABLE environment variable is not set.")
-
-logger.info(f"Environment variables - STATE_BUCKET: {state_bucket_name}, DDB_TABLE: {ddb_table}")
+    raise ValueError("BUCKET_NAME environment variable is not set.")
 logging.getLogger("strands").setLevel(logging.DEBUG)
 logging.basicConfig(
     format="%(levelname)s | %(name)s | %(message)s", 
@@ -52,9 +33,10 @@ bedrock_model = BedrockModel(
 )
 current_agent: Agent | None = None
 conversation_manager = SlidingWindowConversationManager(
-    window_size=2,  # Minimal window for maximum performance
+    window_size=10,  # Maximum number of messages to keep
     should_truncate_results=True, # Enable truncating the tool result when a message is too large for the model's context window 
 )
+
 SYSTEM_PROMPT = """
 You are a digital twin of Blake. You should answer questions about my career for prospective employers. 
 Answer as though I am talking and do not refer say 'Blake' say 'I'. Do not give out any PII information.
