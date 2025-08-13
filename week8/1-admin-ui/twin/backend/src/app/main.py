@@ -89,239 +89,46 @@ def add_question_to_database(question: str) -> str:
         return f"Question stored with ID: {new_question.question_id}. This question has been saved for later processing and will be answered when more information becomes available."
     except Exception as e:
         logger.error(f"Error storing question: {e}")
-        return f"Error storing question: {str(e)}"
-
-
+        return f"Error storing question: {str(e)}"    
     
-    
-def session(id: str, force_new: bool = False) -> Agent:
-    session_start_time = time.time()
-    # Start with just the essential tools to avoid tool_use issues
-    tools = [retrieve, add_question_to_database]
-    logger.info(f"Available tools: {[tool.__name__ if hasattr(tool, '__name__') else str(tool) for tool in tools]}")
-    
-    # If forcing new session, add timestamp to make it unique
-    session_id_to_use = f"{id}_{int(time.time())}" if force_new else id
-    
-    # Time S3 session manager creation
-    s3_start_time = time.time()
+def session(id: str) -> Agent:
+    tools = [retrieve]
     session_manager = S3SessionManager(
         boto_session=boto_session,
         bucket=state_bucket_name,
-        session_id=session_id_to_use,
+        session_id=id,
     )
-    s3_time = time.time() - s3_start_time
-    logger.info(f"S3 session manager creation took: {s3_time:.2f} seconds")
-    
-    # Time agent creation
-    agent_start_time = time.time()
-    agent = Agent(
+    return Agent(
         conversation_manager=conversation_manager,
         model=bedrock_model,
         session_manager=session_manager,
         system_prompt=SYSTEM_PROMPT,
         tools=tools,
     )
-    agent_time = time.time() - agent_start_time
-    logger.info(f"Agent initialization took: {agent_time:.2f} seconds")
-    
-    total_session_time = time.time() - session_start_time
-    logger.info(f"Total session creation time: {total_session_time:.2f} seconds")
-    return agent
     
 class ChatRequest(BaseModel):
     prompt: str
 
 @app.post('/api/chat')
 async def chat(chat_request: ChatRequest, request: Request):
-    request_start_time = time.time()
-    try:
-        logger.info(f"Received chat request: {chat_request.prompt[:100]}...")
-        
-        # Validate that the prompt is not empty
-        if not chat_request.prompt or not chat_request.prompt.strip():
-            logger.warning("Empty prompt received")
-            return Response(
-                content=json.dumps({"error": "Prompt cannot be empty"}),
-                media_type="application/json",
-                status_code=400
-            )
-        
-        session_id: str = request.cookies.get("session_id", str(uuid.uuid4()))
-        logger.info(f"Using session ID: {session_id}")
-        
-        # Time agent creation
-        agent_start_time = time.time()
-        agent = session(session_id)
-        agent_creation_time = time.time() - agent_start_time
-        logger.info(f"Agent creation took: {agent_creation_time:.2f} seconds")
-        
-        global current_agent
-        current_agent = agent  # Store the current agent for use in tools
-        
-        # Check if user wants non-streaming mode
-        use_streaming = request.query_params.get("stream", "true").lower() == "true"
-        
-        if use_streaming:
-            logger.info("Created agent successfully, starting streaming response")
-            response = StreamingResponse(
-                generate(agent, session_id, chat_request.prompt.strip(), request),
-                media_type="text/event-stream"
-            )
-        else:
-            logger.info("Created agent successfully, using non-streaming response")
-            # Use non-streaming approach
-            result = agent(chat_request.prompt.strip())
-            response = Response(
-                content=json.dumps({"response": str(result)}),
-                media_type="application/json"
-            )
-        
-        response.set_cookie(key="session_id", value=session_id)
-        total_request_time = time.time() - request_start_time
-        logger.info(f"Total request processing time: {total_request_time:.2f} seconds")
-        return response
-        
-    except Exception as e:
-        logger.error(f"Error in chat endpoint: {e}")
-        return Response(
-            content=json.dumps({"error": f"Internal server error: {str(e)}"}),
-            media_type="application/json",
-            status_code=500
-        )
+    session_id: str = request.cookies.get("session_id", str(uuid.uuid4()))
+    agent = session(session_id)
+    global current_agent
+    current_agent = agent  # Store the current agent for use in tools
+    response = StreamingResponse(
+        generate(agent, session_id, chat_request.prompt, request),
+        media_type="text/event-stream"
+    )
+    response.set_cookie(key="session_id", value=session_id)
+    return response
 
 async def generate(agent: Agent, session_id: str, prompt: str, request: Request):
-    start_time = time.time()
     try:
-        # Check for any tool_use blocks in the conversation history
-        has_tool_use = any(
-            any(content.get("type") == "tool_use" for content in msg.get("content", []))
-            for msg in agent.messages
-        )
-        
-        if has_tool_use:
-            logger.warning("Found tool_use blocks in conversation history, clearing to prevent validation errors")
-            agent.messages = []
-            # Also try to clear the S3 session
-            try:
-                if hasattr(agent, 'session_manager') and agent.session_manager:
-                    agent.session_manager.clear_session()
-                    logger.info("Cleared S3 session data due to tool_use blocks")
-            except Exception as s3_error:
-                logger.error(f"Error clearing S3 session: {s3_error}")
-        
-        # Clean up any empty messages
-        original_count = len(agent.messages)
-        agent.messages = [msg for msg in agent.messages if 
-                         msg.get("content") and 
-                         len(msg["content"]) > 0]
-        
-        cleaned_count = len(agent.messages)
-        if original_count != cleaned_count:
-            logger.info(f"Cleaned {original_count - cleaned_count} empty messages from conversation history")
-        
-        # Log message count for debugging
-        logger.info(f"Processing chat with {len(agent.messages)} messages in history")
-        
-        # If we still have too many messages, start fresh
-        if len(agent.messages) > 4:
-            logger.warning("Too many messages in history, starting fresh conversation")
-            agent.messages = []
-        
-        full_response = ""
-        char_buffer = ""
-        event_count = 0
-        timeout_count = 0
-        max_timeout = 15  # Reduced to 15 seconds timeout
-        
-        try:
-            async for event in agent.stream_async(prompt):
-                event_count += 1
-                timeout_count = 0  # Reset timeout counter on any event
-                logger.info(f"Stream event #{event_count}: {event}")  # Debug logging
-                
-                if "complete" in event:
-                    logger.info("Response generation complete")
-                    # Flush any remaining buffered characters
-                    if char_buffer:
-                        yield f"data: {char_buffer}\n\n"
-                        char_buffer = ""
-                    break
-                elif "tool_use" in event:
-                    # Handle tool calls - show that a tool is being used
-                    tool_name = event.get("tool_use", {}).get("name", "unknown tool")
-                    logger.info(f"Tool being used: {tool_name}")
-                    yield f"data: [Using {tool_name}...]\n\n"
-                elif "tool_result" in event:
-                    # Handle tool results - show the result
-                    tool_result = event.get("tool_result", {}).get("content", "No result")
-                    logger.info(f"Tool result received: {tool_result[:100]}...")
-                    yield f"data: [Tool result: {tool_result}]\n\n"
-                elif "data" in event:
-                    full_response += event['data']
-                    data = event['data']
-                    logger.info(f"Received data: '{data}'")
-                    
-                    if data:
-                        # Try a different approach: accumulate more text before sending
-                        char_buffer += data
-                        
-                        # Send when we have a complete sentence or phrase
-                        if data in ['.', '!', '?', '\n']:
-                            # Send the complete sentence
-                            yield f"data: {char_buffer}\n\n"
-                            char_buffer = ""
-                        # Or send when we have a substantial amount of text
-                        elif len(char_buffer) >= 50:
-                            yield f"data: {char_buffer}\n\n"
-                            char_buffer = ""
-                        # Or send when we have a complete word followed by space
-                        elif data == ' ' and len(char_buffer) >= 10:
-                            yield f"data: {char_buffer}\n\n"
-                            char_buffer = ""
-                else:
-                    logger.warning(f"Unknown event type: {event}")
-                
-                # No delay - let streaming happen as fast as possible
-                
-            end_time = time.time()
-            total_time = end_time - start_time
-            logger.info(f"Total events processed: {event_count}, Total time: {total_time:.2f} seconds")
-            if event_count == 0:
-                logger.error("No events received from agent.stream_async!")
-                yield f"data: [Error: No response generated]\n\n"
-                
-        except asyncio.TimeoutError:
-            logger.error("Streaming timeout - agent took too long to respond")
-            yield f"data: [Error: Response timeout]\n\n"
-        except Exception as e:
-            logger.error(f"Streaming error: {e}")
-            
-            # Check if this is the specific tool_use validation error
-            if "tool_use" in str(e) and "tool_result" in str(e):
-                logger.error("Detected orphaned tool_use blocks, creating fresh session")
-                try:
-                    # Create a completely new session with a unique ID
-                    new_session_id = f"{session_id}_fresh_{int(time.time())}"
-                    agent = session(new_session_id, force_new=True)
-                    global current_agent
-                    current_agent = agent
-                    logger.info(f"Created fresh session: {new_session_id}")
-                except Exception as cleanup_error:
-                    logger.error(f"Error creating fresh session: {cleanup_error}")
-                
-                yield f"data: [Error: Conversation corrupted. Starting fresh session. Please try your question again.]\n\n"
-                return
-            
-            # Try fallback to non-streaming approach
-            try:
-                logger.info("Attempting fallback to non-streaming response")
-                response = agent(prompt)
-                logger.info(f"Fallback response: {response}")
-                yield f"data: {str(response)}\n\n"
-            except Exception as fallback_error:
-                logger.error(f"Fallback also failed: {fallback_error}")
-                yield f"data: [Error: {str(e)}]\n\n"
+        async for event in agent.stream_async(prompt):
+            if "complete" in event:
+                logger.info("Response generation complete")
+            if "data" in event:
+                yield f"data: {json.dumps(event['data'])}\n\n"
     except Exception as e:
         error_message = json.dumps({"error": str(e)})
         yield f"event: error\ndata: {error_message}\n\n"
@@ -353,300 +160,12 @@ def chat_get(request: Request):
     response.set_cookie(key="session_id", value=session_id)
     return response
 
-@app.post('/api/clear')
-def clear_chat(request: Request):
-    """Clear the conversation history for the current session"""
-    session_id = request.cookies.get("session_id", str(uuid.uuid4()))
-    agent = session(session_id)
-    agent.messages = []
-    
-    # Also clear the global agent to force a fresh session
-    global current_agent
-    current_agent = None
-    
-    response = Response(
-        content=json.dumps({"message": "Conversation history cleared"}),
-        media_type="application/json",
-    )
-    response.set_cookie(key="session_id", value=session_id)
-    return response
-
-@app.get('/api/test-tools')
-def test_tools(request: Request):
-    """Test if tools are working properly"""
-    try:
-        # Test the retrieve tool
-        test_result = retrieve("test query")
-        logger.info(f"Retrieve tool test result: {test_result}")
-        
-        # Test the add_question_to_database tool
-        test_question = add_question_to_database("test question")
-        logger.info(f"Add question tool test result: {test_question}")
-        
-        return Response(
-            content=json.dumps({
-                "message": "Tools tested successfully",
-                "retrieve_result": str(test_result),
-                "add_question_result": str(test_question)
-            }),
-            media_type="application/json",
-        )
-    except Exception as e:
-        logger.error(f"Tool test failed: {e}")
-        return Response(
-            content=json.dumps({"error": f"Tool test failed: {str(e)}"}),
-            media_type="application/json",
-            status_code=500
-        )
-
-@app.get('/api/test-agent')
-def test_agent(request: Request):
-    """Test if the agent can respond without tools"""
-    try:
-        session_id = str(uuid.uuid4())
-        agent = session(session_id)
-        
-        # Test a simple response without tools
-        test_prompt = "Hello, can you introduce yourself?"
-        logger.info(f"Testing agent with prompt: {test_prompt}")
-        
-        # Use a simple call instead of streaming for testing
-        response = agent(test_prompt)
-        logger.info(f"Agent test response: {response}")
-        
-        return Response(
-            content=json.dumps({
-                "message": "Agent test successful",
-                "response": str(response)
-            }),
-            media_type="application/json",
-        )
-    except Exception as e:
-        logger.error(f"Agent test failed: {e}")
-        return Response(
-            content=json.dumps({"error": f"Agent test failed: {str(e)}"}),
-            media_type="application/json",
-            status_code=500
-        )
-
-@app.get('/api/test-unknown-question')
-def test_unknown_question(request: Request):
-    """Test if the agent uses add_question_to_database for unknown questions"""
-    try:
-        session_id = str(uuid.uuid4())
-        agent = session(session_id)
-        
-        # Test with a question the agent shouldn't know
-        test_prompt = "What was my exact salary at my first job in 2010?"
-        logger.info(f"Testing agent with unknown question: {test_prompt}")
-        
-        # Use a simple call instead of streaming for testing
-        response = agent(test_prompt)
-        logger.info(f"Agent response to unknown question: {response}")
-        
-        return Response(
-            content=json.dumps({
-                "message": "Unknown question test completed",
-                "prompt": test_prompt,
-                "response": str(response)
-            }),
-            media_type="application/json",
-        )
-    except Exception as e:
-        logger.error(f"Unknown question test failed: {e}")
-        return Response(
-            content=json.dumps({"error": f"Unknown question test failed: {str(e)}"}),
-            media_type="application/json",
-            status_code=500
-        )
-
-@app.get('/api/test-question-db')
-def test_question_database(request: Request):
-    """Test the question database functionality specifically"""
-    try:
-        # Test adding a question directly
-        test_question = question_manager.add_question("Test question for database verification")
-        logger.info(f"Question added successfully: {test_question.question_id}")
-        
-        return Response(
-            content=json.dumps({
-                "message": "Question database test successful",
-                "question_id": test_question.question_id,
-                "question": test_question.question,
-                "processed": test_question.processed
-            }),
-            media_type="application/json",
-        )
-    except Exception as e:
-        logger.error(f"Question database test failed: {e}")
-        return Response(
-            content=json.dumps({"error": f"Question database test failed: {str(e)}"}),
-            media_type="application/json",
-            status_code=500
-        )
-
-@app.post('/api/chat-simple')
-async def chat_simple(chat_request: ChatRequest, request: Request):
-    """Non-streaming chat endpoint for testing"""
-    request_start_time = time.time()
-    try:
-        logger.info(f"Received simple chat request: {chat_request.prompt[:100]}...")
-        
-        # Time session creation
-        session_start_time = time.time()
-        session_id: str = request.cookies.get("session_id", str(uuid.uuid4()))
-        agent = session(session_id)
-        session_time = time.time() - session_start_time
-        logger.info(f"Session creation took: {session_time:.2f} seconds")
-        
-        # Time model response
-        model_start_time = time.time()
-        result = agent(chat_request.prompt.strip())
-        model_time = time.time() - model_start_time
-        logger.info(f"Model response took: {model_time:.2f} seconds")
-        
-        total_time = time.time() - request_start_time
-        logger.info(f"Total simple chat time: {total_time:.2f} seconds")
-        
-        return Response(
-            content=json.dumps({
-                "response": str(result),
-                "timing": {
-                    "session_creation": round(session_time, 2),
-                    "model_response": round(model_time, 2),
-                    "total_time": round(total_time, 2)
-                }
-            }),
-            media_type="application/json"
-        )
-        
-    except Exception as e:
-        total_time = time.time() - request_start_time
-        logger.error(f"Error in simple chat endpoint: {e}")
-        return Response(
-            content=json.dumps({
-                "error": f"Internal server error: {str(e)}",
-                "time_elapsed": round(total_time, 2)
-            }),
-            media_type="application/json",
-            status_code=500
-        )
-
 
 # Called by the Lambda Adapter to check liveness
 @app.get("/")
 async def root():
     return Response(
-        content=json.dumps({
-            "message": "OK", 
-            "status": "healthy",
-            "timestamp": time.time(),
-            "environment": {
-                "state_bucket": state_bucket_name,
-                "ddb_table": os.environ.get("DDB_TABLE", "not_set"),
-                "model_id": model_id
-            }
-        }),
-        media_type="application/json",
-    )
-
-@app.get("/health")
-async def health_check():
-    """Health check endpoint"""
-    try:
-        # Test basic functionality
-        test_agent = session("health-check")
-        return Response(
-            content=json.dumps({
-                "status": "healthy",
-                "message": "Backend is running",
-                "model_id": model_id,
-                "bucket": state_bucket_name,
-                "conversation_window": 3,
-                "timeout": 15
-            }),
-            media_type="application/json",
-        )
-    except Exception as e:
-        logger.error(f"Health check failed: {e}")
-        return Response(
-            content=json.dumps({
-                "status": "unhealthy",
-                "error": str(e)
-            }),
-            media_type="application/json",
-            status_code=500
-        )
-
-@app.get("/api/performance-test")
-async def performance_test():
-    """Test response time with detailed breakdown"""
-    results = {}
-    
-    # Test 1: Basic agent creation
-    start_time = time.time()
-    try:
-        session_id = str(uuid.uuid4())
-        agent = session(session_id)
-        agent_creation_time = time.time() - start_time
-        results["agent_creation_seconds"] = round(agent_creation_time, 2)
-    except Exception as e:
-        results["agent_creation_error"] = str(e)
-        return Response(
-            content=json.dumps({"status": "error", "error": f"Agent creation failed: {e}"}),
-            media_type="application/json",
-            status_code=500
-        )
-    
-    # Test 2: Simple response without tools
-    start_time = time.time()
-    try:
-        test_prompt = "Hello"
-        response = agent(test_prompt)
-        simple_response_time = time.time() - start_time
-        results["simple_response_seconds"] = round(simple_response_time, 2)
-        results["response_length"] = len(str(response))
-    except Exception as e:
-        results["simple_response_error"] = str(e)
-    
-    # Test 3: AWS connectivity test
-    start_time = time.time()
-    try:
-        # Test S3 connectivity
-        s3_client = boto_session.client('s3', config=boto3_config)
-        s3_client.head_bucket(Bucket=state_bucket_name)
-        s3_time = time.time() - start_time
-        results["s3_connectivity_seconds"] = round(s3_time, 2)
-    except Exception as e:
-        results["s3_connectivity_error"] = str(e)
-    
-    # Test 4: DynamoDB connectivity test
-    start_time = time.time()
-    try:
-        # Test DynamoDB connectivity
-        dynamodb = boto_session.resource('dynamodb', config=boto3_config)
-        table = dynamodb.Table(ddb_table)
-        table.table_status
-        ddb_time = time.time() - start_time
-        results["dynamodb_connectivity_seconds"] = round(ddb_time, 2)
-    except Exception as e:
-        results["dynamodb_connectivity_error"] = str(e)
-    
-    # Test 5: Question manager test
-    start_time = time.time()
-    try:
-        test_question = question_manager.add_question("Performance test question")
-        qm_time = time.time() - start_time
-        results["question_manager_seconds"] = round(qm_time, 2)
-    except Exception as e:
-        results["question_manager_error"] = str(e)
-    
-    total_time = sum([v for v in results.values() if isinstance(v, (int, float))])
-    results["total_time_seconds"] = round(total_time, 2)
-    results["status"] = "success"
-    
-    return Response(
-        content=json.dumps(results),
+        content=json.dumps({"message": "OK"}),
         media_type="application/json",
     )
 
