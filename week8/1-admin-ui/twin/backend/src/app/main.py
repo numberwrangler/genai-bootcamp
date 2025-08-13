@@ -95,6 +95,7 @@ def add_question_to_database(question: str) -> str:
     
     
 def session(id: str, force_new: bool = False) -> Agent:
+    session_start_time = time.time()
     # Start with just the essential tools to avoid tool_use issues
     tools = [retrieve, add_question_to_database]
     logger.info(f"Available tools: {[tool.__name__ if hasattr(tool, '__name__') else str(tool) for tool in tools]}")
@@ -102,24 +103,38 @@ def session(id: str, force_new: bool = False) -> Agent:
     # If forcing new session, add timestamp to make it unique
     session_id_to_use = f"{id}_{int(time.time())}" if force_new else id
     
+    # Time S3 session manager creation
+    s3_start_time = time.time()
     session_manager = S3SessionManager(
         boto_session=boto_session,
         bucket=state_bucket_name,
         session_id=session_id_to_use,
     )
-    return Agent(
+    s3_time = time.time() - s3_start_time
+    logger.info(f"S3 session manager creation took: {s3_time:.2f} seconds")
+    
+    # Time agent creation
+    agent_start_time = time.time()
+    agent = Agent(
         conversation_manager=conversation_manager,
         model=bedrock_model,
         session_manager=session_manager,
         system_prompt=SYSTEM_PROMPT,
         tools=tools,
     )
+    agent_time = time.time() - agent_start_time
+    logger.info(f"Agent initialization took: {agent_time:.2f} seconds")
+    
+    total_session_time = time.time() - session_start_time
+    logger.info(f"Total session creation time: {total_session_time:.2f} seconds")
+    return agent
     
 class ChatRequest(BaseModel):
     prompt: str
 
 @app.post('/api/chat')
 async def chat(chat_request: ChatRequest, request: Request):
+    request_start_time = time.time()
     try:
         logger.info(f"Received chat request: {chat_request.prompt[:100]}...")
         
@@ -135,7 +150,12 @@ async def chat(chat_request: ChatRequest, request: Request):
         session_id: str = request.cookies.get("session_id", str(uuid.uuid4()))
         logger.info(f"Using session ID: {session_id}")
         
+        # Time agent creation
+        agent_start_time = time.time()
         agent = session(session_id)
+        agent_creation_time = time.time() - agent_start_time
+        logger.info(f"Agent creation took: {agent_creation_time:.2f} seconds")
+        
         global current_agent
         current_agent = agent  # Store the current agent for use in tools
         
@@ -158,6 +178,8 @@ async def chat(chat_request: ChatRequest, request: Request):
             )
         
         response.set_cookie(key="session_id", value=session_id)
+        total_request_time = time.time() - request_start_time
+        logger.info(f"Total request processing time: {total_request_time:.2f} seconds")
         return response
         
     except Exception as e:
@@ -466,32 +488,46 @@ def test_question_database(request: Request):
 @app.post('/api/chat-simple')
 async def chat_simple(chat_request: ChatRequest, request: Request):
     """Non-streaming chat endpoint for testing"""
+    request_start_time = time.time()
     try:
         logger.info(f"Received simple chat request: {chat_request.prompt[:100]}...")
         
+        # Time session creation
+        session_start_time = time.time()
         session_id: str = request.cookies.get("session_id", str(uuid.uuid4()))
         agent = session(session_id)
+        session_time = time.time() - session_start_time
+        logger.info(f"Session creation took: {session_time:.2f} seconds")
         
-        # Use non-streaming approach
-        start_time = time.time()
+        # Time model response
+        model_start_time = time.time()
         result = agent(chat_request.prompt.strip())
-        end_time = time.time()
+        model_time = time.time() - model_start_time
+        logger.info(f"Model response took: {model_time:.2f} seconds")
         
-        response_time = end_time - start_time
-        logger.info(f"Simple chat response time: {response_time:.2f} seconds")
+        total_time = time.time() - request_start_time
+        logger.info(f"Total simple chat time: {total_time:.2f} seconds")
         
         return Response(
             content=json.dumps({
                 "response": str(result),
-                "response_time": round(response_time, 2)
+                "timing": {
+                    "session_creation": round(session_time, 2),
+                    "model_response": round(model_time, 2),
+                    "total_time": round(total_time, 2)
+                }
             }),
             media_type="application/json"
         )
         
     except Exception as e:
+        total_time = time.time() - request_start_time
         logger.error(f"Error in simple chat endpoint: {e}")
         return Response(
-            content=json.dumps({"error": f"Internal server error: {str(e)}"}),
+            content=json.dumps({
+                "error": f"Internal server error: {str(e)}",
+                "time_elapsed": round(total_time, 2)
+            }),
             media_type="application/json",
             status_code=500
         )
