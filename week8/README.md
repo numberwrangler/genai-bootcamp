@@ -24,3 +24,40 @@ You will need an SSL certificate for your custom domain from AWS, which is free.
 11. Wait for DNS propagation (this can take a few minutes to several hours)
 12. The certificate status will change from "Pending validation" to "Issued" once validation is complete
 
+---
+
+# Custom domain configuration
+
+## Update the CloudFront configuration
+
+In [app.py](week8/1-admin-ui/app.py) add two parameters to the `Twin` stack:
+
+- `custom_domain_name`: This should match the full domain name you want to host your twin at (eg dtwin.example.com)
+- `custom_certificate_arn`: This should be the [ARN](https://docs.aws.amazon.com/IAM/latest/UserGuide/reference-arns.html) for the certificate you generated above
+
+For example:
+
+```python
+twin_stack = Twin(
+    app,
+    "Twin",
+    # ... existing parameters ...
+    custom_domain_name="dtwin.example.com",  # Replace with your domain
+    custom_certificate_arn="arn:aws:acm:us-east-1:123456789012:certificate/12345678-1234-1234-1234-123456789012"  # Replace with your certificate ARN
+)
+```
+
+Run cdk (via Github Actions, or via `uv run cdk deploy --all`).
+
+## Create a CNAME record
+
+Add a [CNAME record](https://en.wikipedia.org/wiki/CNAME_record) from your full domain to your CloudFront distribution name.
+For example, if your CloudFront distribution is at `d2wmcljp6gwf0d.cloudfront.net` and you are making your twin available
+at `twin.example.com`, add a CNAME record as follows:
+
+```
+twin CNAME d2wmcljp6gwf0d.cloudfront.net.
+```
+
+Depending on your DNS provider, the trailing `.` may or may not be allowed or required.
+For TTL any value is OK - most providers will default to 300 seconds (5 minutes).
