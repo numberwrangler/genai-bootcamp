@@ -106,12 +106,44 @@ async def chat(chat_request: ChatRequest, request: Request):
 
 async def generate(agent: Agent, session_id: str, prompt: str, request: Request):
     try:
+        # Clean up any empty messages before processing
+        original_count = len(agent.messages)
+        agent.messages = [msg for msg in agent.messages if 
+                         msg.get("content") and 
+                         len(msg["content"]) > 0 and
+                         any(content.get("text") or content.get("type") for content in msg["content"])]
+        
+        cleaned_count = len(agent.messages)
+        if original_count != cleaned_count:
+            logger.info(f"Cleaned {original_count - cleaned_count} empty messages from conversation history")
+        
+        # Log message count for debugging
+        logger.info(f"Processing chat with {len(agent.messages)} messages in history")
+        
         async for event in agent.stream_async(prompt):
             if "complete" in event:
                 logger.info("Response generation complete")
             if "data" in event:
                 yield f"data: {json.dumps(event['data'])}\n\n"
     except Exception as e:
+        logger.error(f"Error in generate: {e}")
+        
+        # Check if this is the specific empty content validation error
+        if "content field" in str(e) and "empty" in str(e):
+            logger.error("Detected empty content validation error, clearing conversation history")
+            try:
+                # Clear all messages to start fresh
+                agent.messages = []
+                # Also try to clear the S3 session
+                if hasattr(agent, 'session_manager') and agent.session_manager:
+                    agent.session_manager.clear_session()
+                    logger.info("Cleared S3 session data due to empty content error")
+            except Exception as cleanup_error:
+                logger.error(f"Error clearing session: {cleanup_error}")
+            
+            yield f"data: [Error: Conversation corrupted. Starting fresh session. Please try your question again.]\n\n"
+            return
+        
         error_message = json.dumps({"error": str(e)})
         yield f"event: error\ndata: {error_message}\n\n"
 
@@ -141,6 +173,34 @@ def chat_get(request: Request):
     )
     response.set_cookie(key="session_id", value=session_id)
     return response
+
+@app.get('/api/debug-messages')
+def debug_messages(request: Request):
+    """Debug endpoint to inspect conversation messages"""
+    session_id = request.cookies.get("session_id", str(uuid.uuid4()))
+    agent = session(session_id)
+    
+    debug_info = {
+        "session_id": session_id,
+        "total_messages": len(agent.messages),
+        "messages": []
+    }
+    
+    for i, message in enumerate(agent.messages):
+        message_info = {
+            "index": i,
+            "role": message.get("role"),
+            "has_content": bool(message.get("content")),
+            "content_length": len(message.get("content", [])),
+            "content_types": [content.get("type") for content in message.get("content", [])],
+            "is_empty": not message.get("content") or len(message.get("content", [])) == 0
+        }
+        debug_info["messages"].append(message_info)
+    
+    return Response(
+        content=json.dumps(debug_info, indent=2),
+        media_type="application/json",
+    )
 
 
 # Called by the Lambda Adapter to check liveness
