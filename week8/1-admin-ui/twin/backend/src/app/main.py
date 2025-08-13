@@ -92,7 +92,7 @@ def add_question_to_database(question: str) -> str:
         return f"Error storing question: {str(e)}"    
     
 def session(id: str) -> Agent:
-    tools = [retrieve]
+    tools = [retrieve, add_question_to_database]
     session_manager = S3SessionManager(
         boto_session=boto_session,
         bucket=state_bucket_name,
