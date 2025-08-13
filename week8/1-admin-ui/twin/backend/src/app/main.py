@@ -91,14 +91,7 @@ def add_question_to_database(question: str) -> str:
         logger.error(f"Error storing question: {e}")
         return f"Error storing question: {str(e)}"
 
-@tool
-def type_out_text(answer: str) -> str:
-    """
-    Types out the answer character by character for a typewriter effect.
-    This tool should be used for the final response to create a typewriter effect.
-    """
-    # Return the full answer - the streaming will handle the typewriter effect
-    return answer
+
     
     
 def session(id: str, force_new: bool = False) -> Agent:
@@ -267,8 +260,7 @@ async def generate(agent: Agent, session_id: str, prompt: str, request: Request)
                 else:
                     logger.warning(f"Unknown event type: {event}")
                 
-                # Add timeout protection - reduced delay
-                await asyncio.sleep(0.01)  # Minimal delay to prevent blocking
+                # No delay - let streaming happen as fast as possible
                 
             end_time = time.time()
             total_time = end_time - start_time
